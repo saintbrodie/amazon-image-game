@@ -1,0 +1,15 @@
+# Generated game data and raw source datasets
+data/rounds.json
+data/raw/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Guess the product from a mysterious customer review photo.">
+  <title>What Did They Buy?</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="site-header">
+      <a class="brand" href="./" aria-label="What Did They Buy? home">
+        <span class="brand-mark" aria-hidden="true">?</span>
+        <span>
+          <strong>WHAT DID THEY BUY?</strong>
+          <small>review photo guessing game</small>
+        </span>
+      </a>
+      <button class="text-button" id="aboutButton" type="button">About</button>
+    </header>
+
+    <main>
+      <section class="game-toolbar" aria-label="Game controls">
+        <div class="mode-switch" role="group" aria-label="Clue mode">
+          <button class="mode-button is-active" type="button" data-mode="photo">Photo only</button>
+          <button class="mode-button" type="button" data-mode="review">Photo + review</button>
+        </div>
+        <button class="secondary-button" id="newGameButton" type="button">New game</button>
+      </section>
+
+      <section class="status-row" aria-label="Game status">
+        <div><span class="status-label">Round</span><strong id="roundStatus">1 / 6</strong></div>
+        <div><span class="status-label">Score</span><strong id="scoreStatus">0</strong></div>
+        <div><span class="status-label">Streak</span><strong id="streakStatus">0</strong></div>
+      </section>
+
+      <section class="game-card" id="gameCard">
+        <div class="loading-state" id="loadingState">Loading mystery photos…</div>
+
+        <div class="game-content" id="gameContent" hidden>
+          <div class="photo-column">
+            <div class="photo-frame" id="photoFrame">
+              <img id="reviewImage" alt="Customer review photo">
+              <div class="photo-fallback" id="photoFallback" hidden>
+                <strong>Photo unavailable</strong>
+                <span>This round can still be answered from the choices.</span>
+              </div>
+            </div>
+            <p class="photo-caption">Customer review photo</p>
+
+            <article class="review-clue" id="reviewClue" hidden>
+              <div class="stars" id="clueStars" aria-label="Review rating"></div>
+              <strong id="clueTitle"></strong>
+              <p id="clueText"></p>
+            </article>
+          </div>
+
+          <div class="answer-column">
+            <p class="eyebrow">Mystery item</p>
+            <h1>What product is this review for?</h1>
+            <p class="instruction">Pick the most likely product. Press 1–4 on your keyboard if you want to move fast.</p>
+            <div class="choices" id="choices" role="group" aria-label="Product choices"></div>
+
+            <article class="reveal-card" id="revealCard" hidden aria-live="polite">
+              <div class="reveal-result">
+                <span class="result-badge" id="resultBadge"></span>
+                <span id="pointsAwarded"></span>
+              </div>
+              <h2 id="productTitle"></h2>
+              <div class="product-meta" id="productMeta"></div>
+              <div class="review-copy">
+                <div class="stars" id="revealStars"></div>
+                <strong id="reviewTitle"></strong>
+                <p id="reviewText"></p>
+              </div>
+              <a class="source-link" id="sourceLink" target="_blank" rel="noopener noreferrer" hidden>View product source</a>
+              <button class="primary-button" id="nextButton" type="button">Next round</button>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="finish-card" id="finishCard" hidden>
+        <p class="eyebrow">Game over</p>
+        <h2 id="finishHeadline">Nice work.</h2>
+        <p id="finishSummary"></p>
+        <div class="finish-score"><strong id="finishScore">0</strong><span>points</span></div>
+        <button class="primary-button" id="playAgainButton" type="button">Play again</button>
+      </section>
+
+      <p class="dataset-note" id="datasetNote"></p>
+    </main>
+  </div>
+
+  <dialog class="about-dialog" id="aboutDialog">
+    <button class="dialog-close" id="closeAboutButton" type="button" aria-label="Close">×</button>
+    <p class="eyebrow">About the game</p>
+    <h2>What Did They Buy?</h2>
+    <p>Guess products from customer review photos. The bundled demo uses original mock images. A local dataset builder can turn image-bearing Amazon Reviews 2023 records into game rounds without live-scraping Amazon.</p>
+    <p>This project is not affiliated with or endorsed by Amazon. Review images and metadata from third-party datasets may have separate rights and usage restrictions. Check those terms before publishing a dataset-backed deployment.</p>
+  </dialog>
+
+  <noscript>This game needs JavaScript enabled.</noscript>
+  <script src="app.js" defer></script>
+</body>
+</html>

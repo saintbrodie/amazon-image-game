@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "name": "Bundled demo",
+  "source": "Original mock review images included with the project",
+  "rounds": [
+    {
+      "id": "demo-cat-fountain",
+      "review_image": "assets/demo/review-cat-fountain.svg",
+      "rating": 3,
+      "review_title": "He likes it. The floor does not.",
+      "review_text": "The cat figured it out immediately, but somehow half the water ends up next to it by morning.",
+      "product": {"title": "Automatic cat water fountain", "category": "Pet Supplies", "price": 29.99},
+      "choices": ["Automatic cat water fountain", "Desktop humidifier", "Countertop ice maker", "Foaming soap dispenser"]
+    },
+    {
+      "id": "demo-extension-cord",
+      "review_image": "assets/demo/review-extension-cord.svg",
+      "rating": 1,
+      "review_title": "Got very hot outside",
+      "review_text": "Used it for patio lights. The end softened and discolored after a few nights, so I stopped using it.",
+      "product": {"title": "Outdoor extension cord", "category": "Tools & Home Improvement", "price": 18.49},
+      "choices": ["Outdoor extension cord", "Electric grill igniter", "Battery charger cable", "Heated blanket controller"]
+    },
+    {
+      "id": "demo-camping-chair",
+      "review_image": "assets/demo/review-camping-chair.svg",
+      "rating": 2,
+      "review_title": "Lasted one camping trip",
+      "review_text": "One rear joint folded inward while I was sitting down. At least the cup holder survived.",
+      "product": {"title": "Folding camping chair", "category": "Sports & Outdoors", "price": 34.95},
+      "choices": ["Folding camping chair", "Portable hammock stand", "Collapsible utility wagon", "Elevated dog cot"]
+    },
+    {
+      "id": "demo-sprinkler",
+      "review_image": "assets/demo/review-sprinkler.svg",
+      "rating": 2,
+      "review_title": "Waters the sidewalk beautifully",
+      "review_text": "The bar started spraying sideways from one end after a week. My driveway is thriving.",
+      "product": {"title": "Oscillating lawn sprinkler", "category": "Patio, Lawn & Garden", "price": 22.75},
+      "choices": ["Oscillating lawn sprinkler", "Pressure washer wand", "Pool fountain attachment", "Rotating car wash brush"]
+    },
+    {
+      "id": "demo-dog-toy",
+      "review_image": "assets/demo/review-dog-toy.svg",
+      "rating": 4,
+      "review_title": "Five stars from the dog, four from me",
+      "review_text": "He was obsessed. It was also snowing stuffing in the living room within twenty minutes.",
+      "product": {"title": "Plush squeaky dog toy", "category": "Pet Supplies", "price": 12.99},
+      "choices": ["Plush squeaky dog toy", "Decorative throw pillow", "Travel neck pillow", "Microwavable hand warmer"]
+    },
+    {
+      "id": "demo-shower-caddy",
+      "review_image": "assets/demo/review-shower-caddy.svg",
+      "rating": 2,
+      "review_title": "Gravity wins again",
+      "review_text": "Looked great for two days. Woke up to shampoo, soap, and the whole shelf sitting in the tub.",
+      "product": {"title": "Suction cup shower caddy", "category": "Home & Kitchen", "price": 19.95},
+      "choices": ["Suction cup shower caddy", "Sink sponge organizer", "Wall-mounted toilet paper holder", "Adhesive tablet wall mount"]
+    }
+  ]
+}
