@@ -31,9 +31,20 @@ def round_category(round_data: dict[str, Any]) -> str:
     return fallback.strip() if isinstance(fallback, str) and fallback.strip() else "Other"
 
 
+def game_core_hash(value: str) -> int:
+    """Match GameCore.hashString's FNV-1a over JavaScript UTF-16 code units."""
+    hash_value = 2166136261
+    encoded = str(value).encode("utf-16-le", errors="surrogatepass")
+    for offset in range(0, len(encoded), 2):
+        code_unit = encoded[offset] | (encoded[offset + 1] << 8)
+        hash_value ^= code_unit
+        hash_value = (hash_value * 16777619) & 0xFFFFFFFF
+    return hash_value
+
+
 def dataset_signature(rounds: list[dict[str, Any]]) -> str:
     ids = sorted(str(round_data.get("id", "")) for round_data in rounds)
-    return hashlib.sha256("|".join(ids).encode("utf-8")).hexdigest()[:24]
+    return format(game_core_hash("|".join(ids)), "x")
 
 
 def deterministic_round_order(rounds: list[dict[str, Any]], seed: int) -> list[dict[str, Any]]:

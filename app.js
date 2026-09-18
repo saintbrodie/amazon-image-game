@@ -1,3 +1,4 @@
+const MANIFEST_SOURCE = "data/rounds.manifest.json";
 const DATA_SOURCES = ["data/rounds.json", "data/demo.json"];
 const DEFAULT_MODE = localStorage.getItem("mystery-cart-mode") || "photo";
 const DEFAULT_CATEGORY = localStorage.getItem("mystery-cart-category") || "all";
@@ -6,7 +7,9 @@ const DEFAULT_ROUND_COUNT = localStorage.getItem("mystery-cart-round-count") || 
 const state = {
   dataset: null,
   datasetSignature: "",
-  rounds: [],
+  loader: null,
+  catalog: [],
+  loadToken: 0,
   order: [],
   index: 0,
   score: 0,
@@ -92,45 +95,6 @@ function humanizeCategory(value) {
   return cleanText(value, "Other").replaceAll("_and_", " & ").replaceAll("_", " ");
 }
 
-function normalizeData(payload) {
-  if (!payload || !Array.isArray(payload.rounds)) {
-    throw new Error("Dataset must contain a rounds array.");
-  }
-
-  const rounds = payload.rounds.filter((round) => {
-    return round
-      && round.id
-      && round.review_image
-      && round.product?.title
-      && Array.isArray(round.choices)
-      && round.choices.length >= 2
-      && round.choices.includes(round.product.title);
-  });
-
-  if (!rounds.length) {
-    throw new Error("Dataset does not contain any playable rounds.");
-  }
-
-  return { ...payload, rounds };
-}
-
-async function loadDataset() {
-  let lastError = null;
-
-  for (const source of DATA_SOURCES) {
-    try {
-      const response = await fetch(source, { cache: "no-store" });
-      if (!response.ok) throw new Error(`${source}: ${response.status}`);
-      const payload = normalizeData(await response.json());
-      return { payload, source };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-
-  throw lastError || new Error("No game dataset could be loaded.");
-}
-
 function starString(rating) {
   const value = Math.max(0, Math.min(5, Math.round(Number(rating) || 0)));
   return `${"★".repeat(value)}${"☆".repeat(5 - value)}`;
@@ -160,7 +124,7 @@ function setMode(mode, { persist = true } = {}) {
 }
 
 function populateCategorySelect() {
-  const categories = [...new Set(state.rounds.map(categoryKey))]
+  const categories = state.loader.categories()
     .sort((left, right) => humanizeCategory(left).localeCompare(humanizeCategory(right)));
 
   const options = [new Option("All categories", "all")];
@@ -173,9 +137,20 @@ function populateCategorySelect() {
   els.categorySelect.value = state.category;
 }
 
-function selectedPool() {
-  if (state.category === "all") return state.rounds;
-  return state.rounds.filter((round) => categoryKey(round) === state.category);
+function selectedCatalog() {
+  if (state.category === "all") return state.catalog;
+  return state.catalog.filter((entry) => entry.category === state.category);
+}
+
+function setRoundLoading(active, message = "Loading mystery photos…") {
+  els.loadingState.textContent = message;
+  els.loadingState.hidden = !active;
+  els.gameContent.hidden = active;
+}
+
+function showRoundLoadError(error) {
+  setRoundLoading(true, `Could not load game rounds: ${error.message}`);
+  console.error(error);
 }
 
 function normalizedRoundCount(poolSize) {
@@ -217,7 +192,8 @@ function setDailyUi(active, dateKey = null) {
   }
 }
 
-function startNormalGame() {
+async function startNormalGame() {
+  const loadToken = ++state.loadToken;
   state.daily = false;
   state.dailyDate = null;
   setDailyUi(false);
@@ -225,17 +201,27 @@ function startNormalGame() {
   setMode(state.normalMode);
   resetScoreState();
 
-  let pool = selectedPool();
+  let pool = selectedCatalog();
   if (!pool.length) {
     state.category = "all";
     els.categorySelect.value = "all";
-    pool = state.rounds;
+    pool = state.catalog;
   }
-  state.order = shuffle(pool).slice(0, normalizedRoundCount(pool.length));
+  const count = normalizedRoundCount(pool.length);
+  const entries = state.roundCount === "all" ? pool : shuffle(pool).slice(0, count);
 
   els.finishCard.hidden = true;
   els.gameCard.hidden = false;
-  renderRound();
+  setRoundLoading(true);
+  try {
+    const rounds = await state.loader.loadEntries(entries);
+    if (loadToken !== state.loadToken) return;
+    state.order = rounds;
+    setRoundLoading(false);
+    renderRound();
+  } catch (error) {
+    if (loadToken === state.loadToken) showRoundLoadError(error);
+  }
 }
 
 function dailyStorageKey(dateKey) {
@@ -265,7 +251,8 @@ function saveDailyResult() {
   localStorage.setItem(dailyStorageKey(state.dailyDate), JSON.stringify(payload));
 }
 
-function startDailyGame(dateKey = GameCore.utcDateKey()) {
+async function startDailyGame(dateKey = GameCore.utcDateKey()) {
+  const loadToken = ++state.loadToken;
   const resolvedDate = GameCore.isDateKey(dateKey) ? dateKey : GameCore.utcDateKey();
   state.daily = true;
   state.dailyDate = resolvedDate;
@@ -273,7 +260,8 @@ function startDailyGame(dateKey = GameCore.utcDateKey()) {
   setDailyUi(true, resolvedDate);
   setDailyUrl(resolvedDate);
   resetScoreState();
-  state.order = GameCore.dailyRounds(state.rounds, resolvedDate, 5);
+  const entries = GameCore.dailyRounds(state.catalog, resolvedDate, 5);
+  state.order = entries;
 
   const saved = readSavedDaily(resolvedDate);
   if (saved) {
@@ -289,7 +277,16 @@ function startDailyGame(dateKey = GameCore.utcDateKey()) {
 
   els.finishCard.hidden = true;
   els.gameCard.hidden = false;
-  renderRound();
+  setRoundLoading(true);
+  try {
+    const rounds = await state.loader.loadEntries(entries);
+    if (loadToken !== state.loadToken) return;
+    state.order = rounds;
+    setRoundLoading(false);
+    renderRound();
+  } catch (error) {
+    if (loadToken === state.loadToken) showRoundLoadError(error);
+  }
 }
 
 function currentRound() {
@@ -477,9 +474,10 @@ function updateDatasetNote(source) {
     state.dataset?.name,
     source.endsWith("demo.json") ? "Bundled demo" : "Local dataset",
   );
-  const categoryCount = new Set(state.rounds.map(categoryKey)).size;
+  const categoryCount = state.loader.categories().length;
   const categoryCopy = `${categoryCount} ${categoryCount === 1 ? "category" : "categories"}`;
-  els.datasetNote.textContent = `${label} · ${state.rounds.length.toLocaleString()} playable rounds · ${categoryCopy}.`;
+  const loadingCopy = state.loader.type === "sharded" ? " · lazy-loaded shards" : "";
+  els.datasetNote.textContent = `${label} · ${state.loader.roundCount.toLocaleString()} playable rounds · ${categoryCopy}${loadingCopy}.`;
 }
 
 function dailyShareUrl() {
@@ -601,20 +599,22 @@ async function init() {
   state.roundCount = els.roundCountSelect.value;
 
   try {
-    const { payload, source } = await loadDataset();
-    state.dataset = payload;
-    state.rounds = payload.rounds;
-    state.datasetSignature = GameCore.hashString(
-      state.rounds.map((round) => round.id).sort().join("|"),
+    const loader = await DatasetLoader.open({
+      manifestSource: MANIFEST_SOURCE,
+      dataSources: DATA_SOURCES,
+    });
+    state.loader = loader;
+    state.dataset = loader.metadata;
+    state.catalog = loader.index;
+    state.datasetSignature = loader.signature || GameCore.hashString(
+      state.catalog.map((entry) => entry.id).sort().join("|"),
     ).toString(16);
     populateCategorySelect();
-    els.loadingState.hidden = true;
-    els.gameContent.hidden = false;
-    updateDatasetNote(source);
+    updateDatasetNote(loader.source);
 
     const dailyDate = requestedDailyDate();
-    if (dailyDate) startDailyGame(dailyDate);
-    else startNormalGame();
+    if (dailyDate) await startDailyGame(dailyDate);
+    else await startNormalGame();
   } catch (error) {
     els.loadingState.textContent = `Could not load game data: ${error.message}`;
     console.error(error);

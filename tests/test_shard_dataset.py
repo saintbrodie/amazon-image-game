@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from shard_dataset import dataset_signature, shard_dataset, write_sharded_dataset  # noqa: E402
+from shard_dataset import dataset_signature, game_core_hash, shard_dataset, write_sharded_dataset  # noqa: E402
 
 
 def make_round(index: int, category: str) -> dict:
@@ -42,6 +42,9 @@ class ShardDatasetTests(unittest.TestCase):
                 make_round(7, "Automotive"),
             ],
         }
+
+    def test_game_core_hash_matches_fnv_reference(self):
+        self.assertEqual(game_core_hash("hello"), 0x4F9F2CAB)
 
     def test_shards_have_no_loss_or_duplicate_rounds(self):
         manifest, shards = shard_dataset(self.payload, shard_size=3)
