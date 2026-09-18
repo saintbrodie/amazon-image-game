@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from build_dataset import build_game_data
+from pack_choices import candidate_banks, rerank_pack_choices
 
 HF_RAW_BASE = "https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw"
 REVIEW_BASE = f"{HF_RAW_BASE}/review_categories"
@@ -102,6 +103,22 @@ def filter_live_images(
     return filtered, len(rounds) - len(filtered)
 
 
+def _merge_choice_bank(
+    destination: dict[str, list[str]],
+    seen: dict[str, set[str]],
+    rounds: list[dict[str, Any]],
+) -> None:
+    for category, titles in candidate_banks(rounds).items():
+        target = destination.setdefault(category, [])
+        target_seen = seen.setdefault(category, set())
+        for title in titles:
+            key = title.casefold()
+            if key in target_seen:
+                continue
+            target_seen.add(key)
+            target.append(title)
+
+
 def build_pack(
     categories: list[str],
     *,
@@ -128,6 +145,8 @@ def build_pack(
     combined: list[dict[str, Any]] = []
     category_stats: dict[str, Any] = {}
     failures: dict[str, str] = {}
+    choice_banks: dict[str, list[str]] = {}
+    choice_bank_seen: dict[str, set[str]] = {}
 
     for index, category in enumerate(categories):
         label = category_label(category)
@@ -145,6 +164,11 @@ def build_pack(
                 max_metadata_records=max_metadata_records,
             )
             rounds = payload["rounds"]
+            # Preserve the larger pre-trim bank of plausible metadata-reservoir
+            # candidates so final choice reranking has more than the selected
+            # products themselves to work with.
+            _merge_choice_bank(choice_banks, choice_bank_seen, rounds)
+
             dead = 0
             if check_images:
                 print(f"Checking {len(rounds):,} review image URLs…", flush=True)
@@ -160,6 +184,7 @@ def build_pack(
                 **payload["stats"],
                 "dead_images_removed": dead,
                 "rounds_kept": len(rounds),
+                "choice_bank_titles": len(choice_banks.get(category, [])),
             }
             print(f"Kept {len(rounds):,} {label} rounds.", flush=True)
         except Exception as exc:
@@ -184,6 +209,7 @@ def build_pack(
 
     rng.shuffle(unique)
     unique = unique[:limit]
+    choice_stats = rerank_pack_choices(unique, seed=seed, banks=choice_banks)
     successful_categories = [category for category in categories if category in category_stats]
 
     return {
@@ -199,6 +225,7 @@ def build_pack(
             "image_health_check": check_images,
             "max_review_records": max_review_records,
             "max_metadata_records": max_metadata_records,
+            "choice_reranking": choice_stats,
             "category_stats": category_stats,
             "failures": failures,
         },
