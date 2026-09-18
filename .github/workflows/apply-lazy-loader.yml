@@ -1,0 +1,83 @@
+name: Apply lazy loader app patch
+
+on:
+  push:
+    branches: [build/lazy-shard-loader]
+    paths:
+      - ".github/workflows/apply-lazy-loader.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build/lazy-shard-loader
+      - name: Patch app for lazy data sources
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app.js")
+          text = path.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  'const DATA_SOURCES = ["data/rounds.json", "data/demo.json"];',
+                  'const MANIFEST_SOURCE = "data/rounds.manifest.json";\nconst DATA_SOURCES = ["data/rounds.json", "data/demo.json"];',
+              ),
+              (
+                  '  dataset: null,\n  datasetSignature: "",\n  rounds: [],\n  order: [],',
+                  '  dataset: null,\n  datasetSignature: "",\n  loader: null,\n  catalog: [],\n  loadToken: 0,\n  order: [],',
+              ),
+              (
+                  '''function normalizeData(payload) {\n  if (!payload || !Array.isArray(payload.rounds)) {\n    throw new Error("Dataset must contain a rounds array.");\n  }\n\n  const rounds = payload.rounds.filter((round) => {\n    return round\n      && round.id\n      && round.review_image\n      && round.product?.title\n      && Array.isArray(round.choices)\n      && round.choices.length >= 2\n      && round.choices.includes(round.product.title);\n  });\n\n  if (!rounds.length) {\n    throw new Error("Dataset does not contain any playable rounds.");\n  }\n\n  return { ...payload, rounds };\n}\n\nasync function loadDataset() {\n  let lastError = null;\n\n  for (const source of DATA_SOURCES) {\n    try {\n      const response = await fetch(source, { cache: "no-store" });\n      if (!response.ok) throw new Error(`${source}: ${response.status}`);\n      const payload = normalizeData(await response.json());\n      return { payload, source };\n    } catch (error) {\n      lastError = error;\n    }\n  }\n\n  throw lastError || new Error("No game dataset could be loaded.");\n}\n\n''',
+                  '',
+              ),
+              (
+                  '''function populateCategorySelect() {\n  const categories = [...new Set(state.rounds.map(categoryKey))]\n    .sort((left, right) => humanizeCategory(left).localeCompare(humanizeCategory(right)));''',
+                  '''function populateCategorySelect() {\n  const categories = state.loader.categories()\n    .sort((left, right) => humanizeCategory(left).localeCompare(humanizeCategory(right)));''',
+              ),
+              (
+                  '''function selectedPool() {\n  if (state.category === "all") return state.rounds;\n  return state.rounds.filter((round) => categoryKey(round) === state.category);\n}''',
+                  '''function selectedCatalog() {\n  if (state.category === "all") return state.catalog;\n  return state.catalog.filter((entry) => entry.category === state.category);\n}\n\nfunction setRoundLoading(active, message = "Loading mystery photos…") {\n  els.loadingState.textContent = message;\n  els.loadingState.hidden = !active;\n  els.gameContent.hidden = active;\n}\n\nfunction showRoundLoadError(error) {\n  setRoundLoading(true, `Could not load game rounds: ${error.message}`);\n  console.error(error);\n}''',
+              ),
+              (
+                  '''function startNormalGame() {\n  state.daily = false;\n  state.dailyDate = null;\n  setDailyUi(false);\n  setDailyUrl(null);\n  setMode(state.normalMode);\n  resetScoreState();\n\n  let pool = selectedPool();\n  if (!pool.length) {\n    state.category = "all";\n    els.categorySelect.value = "all";\n    pool = state.rounds;\n  }\n  state.order = shuffle(pool).slice(0, normalizedRoundCount(pool.length));\n\n  els.finishCard.hidden = true;\n  els.gameCard.hidden = false;\n  renderRound();\n}''',
+                  '''async function startNormalGame() {\n  const loadToken = ++state.loadToken;\n  state.daily = false;\n  state.dailyDate = null;\n  setDailyUi(false);\n  setDailyUrl(null);\n  setMode(state.normalMode);\n  resetScoreState();\n\n  let pool = selectedCatalog();\n  if (!pool.length) {\n    state.category = "all";\n    els.categorySelect.value = "all";\n    pool = state.catalog;\n  }\n  const count = normalizedRoundCount(pool.length);\n  const entries = state.roundCount === "all" ? pool : shuffle(pool).slice(0, count);\n\n  els.finishCard.hidden = true;\n  els.gameCard.hidden = false;\n  setRoundLoading(true);\n  try {\n    const rounds = await state.loader.loadEntries(entries);\n    if (loadToken !== state.loadToken) return;\n    state.order = rounds;\n    setRoundLoading(false);\n    renderRound();\n  } catch (error) {\n    if (loadToken === state.loadToken) showRoundLoadError(error);\n  }\n}''',
+              ),
+              (
+                  '''function startDailyGame(dateKey = GameCore.utcDateKey()) {\n  const resolvedDate = GameCore.isDateKey(dateKey) ? dateKey : GameCore.utcDateKey();\n  state.daily = true;\n  state.dailyDate = resolvedDate;\n  setMode("photo", { persist: false });\n  setDailyUi(true, resolvedDate);\n  setDailyUrl(resolvedDate);\n  resetScoreState();\n  state.order = GameCore.dailyRounds(state.rounds, resolvedDate, 5);\n\n  const saved = readSavedDaily(resolvedDate);\n  if (saved) {\n    state.score = Number(saved.score) || 0;\n    state.correct = Number(saved.correct) || 0;\n    state.skipped = Number(saved.skipped) || 0;\n    state.outcomes = saved.outcomes.slice(0, state.order.length);\n    while (state.outcomes.length < state.order.length) state.outcomes.push("skipped");\n    state.index = state.order.length;\n    finishGame({ restored: true });\n    return;\n  }\n\n  els.finishCard.hidden = true;\n  els.gameCard.hidden = false;\n  renderRound();\n}''',
+                  '''async function startDailyGame(dateKey = GameCore.utcDateKey()) {\n  const loadToken = ++state.loadToken;\n  const resolvedDate = GameCore.isDateKey(dateKey) ? dateKey : GameCore.utcDateKey();\n  state.daily = true;\n  state.dailyDate = resolvedDate;\n  setMode("photo", { persist: false });\n  setDailyUi(true, resolvedDate);\n  setDailyUrl(resolvedDate);\n  resetScoreState();\n  const entries = GameCore.dailyRounds(state.catalog, resolvedDate, 5);\n  state.order = entries;\n\n  const saved = readSavedDaily(resolvedDate);\n  if (saved) {\n    state.score = Number(saved.score) || 0;\n    state.correct = Number(saved.correct) || 0;\n    state.skipped = Number(saved.skipped) || 0;\n    state.outcomes = saved.outcomes.slice(0, state.order.length);\n    while (state.outcomes.length < state.order.length) state.outcomes.push("skipped");\n    state.index = state.order.length;\n    finishGame({ restored: true });\n    return;\n  }\n\n  els.finishCard.hidden = true;\n  els.gameCard.hidden = false;\n  setRoundLoading(true);\n  try {\n    const rounds = await state.loader.loadEntries(entries);\n    if (loadToken !== state.loadToken) return;\n    state.order = rounds;\n    setRoundLoading(false);\n    renderRound();\n  } catch (error) {\n    if (loadToken === state.loadToken) showRoundLoadError(error);\n  }\n}''',
+              ),
+              (
+                  '''function updateDatasetNote(source) {\n  const label = cleanText(\n    state.dataset?.name,\n    source.endsWith("demo.json") ? "Bundled demo" : "Local dataset",\n  );\n  const categoryCount = new Set(state.rounds.map(categoryKey)).size;\n  const categoryCopy = `${categoryCount} ${categoryCount === 1 ? "category" : "categories"}`;\n  els.datasetNote.textContent = `${label} · ${state.rounds.length.toLocaleString()} playable rounds · ${categoryCopy}.`;\n}''',
+                  '''function updateDatasetNote(source) {\n  const label = cleanText(\n    state.dataset?.name,\n    source.endsWith("demo.json") ? "Bundled demo" : "Local dataset",\n  );\n  const categoryCount = state.loader.categories().length;\n  const categoryCopy = `${categoryCount} ${categoryCount === 1 ? "category" : "categories"}`;\n  const loadingCopy = state.loader.type === "sharded" ? " · lazy-loaded shards" : "";\n  els.datasetNote.textContent = `${label} · ${state.loader.roundCount.toLocaleString()} playable rounds · ${categoryCopy}${loadingCopy}.`;\n}''',
+              ),
+              (
+                  '''  try {\n    const { payload, source } = await loadDataset();\n    state.dataset = payload;\n    state.rounds = payload.rounds;\n    state.datasetSignature = GameCore.hashString(\n      state.rounds.map((round) => round.id).sort().join("|"),\n    ).toString(16);\n    populateCategorySelect();\n    els.loadingState.hidden = true;\n    els.gameContent.hidden = false;\n    updateDatasetNote(source);\n\n    const dailyDate = requestedDailyDate();\n    if (dailyDate) startDailyGame(dailyDate);\n    else startNormalGame();\n  } catch (error) {''',
+                  '''  try {\n    const loader = await DatasetLoader.open({\n      manifestSource: MANIFEST_SOURCE,\n      dataSources: DATA_SOURCES,\n    });\n    state.loader = loader;\n    state.dataset = loader.metadata;\n    state.catalog = loader.index;\n    state.datasetSignature = loader.signature || GameCore.hashString(\n      state.catalog.map((entry) => entry.id).sort().join("|"),\n    ).toString(16);\n    populateCategorySelect();\n    updateDatasetNote(loader.source);\n\n    const dailyDate = requestedDailyDate();\n    if (dailyDate) await startDailyGame(dailyDate);\n    else await startNormalGame();\n  } catch (error) {''',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"Expected app source block not found:\n{old[:500]}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+          node --check app.js
+          node --check dataset-loader.js
+          node tests/test_dataset_loader.js
+          git diff --check
+      - name: Commit app patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.js
+          git commit -m "Lazy-load selected dataset shards in browser"
+          git push origin HEAD:build/lazy-shard-loader
