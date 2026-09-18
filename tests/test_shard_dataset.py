@@ -105,6 +105,9 @@ class ShardDatasetTests(unittest.TestCase):
         duplicate = {**self.payload, "rounds": self.payload["rounds"] + [self.payload["rounds"][0]]}
         with self.assertRaises(ValueError):
             shard_dataset(duplicate, shard_size=3)
+        for unsafe in ("../escape/rounds", "/absolute/rounds", r"..\escape\rounds"):
+            with self.subTest(unsafe=unsafe), self.assertRaises(ValueError):
+                shard_dataset(self.payload, shard_size=3, shard_prefix=unsafe)
 
 
 if __name__ == "__main__":
