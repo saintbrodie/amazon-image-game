@@ -1,5 +1,6 @@
 # Generated game data, audit output, and raw source datasets
 data/rounds*.json
+data/shards/
 data/audit*.json
 data/raw/
 
