@@ -1,6 +1,9 @@
 # Generated game data and raw source datasets
-data/rounds.json
+data/rounds*.json
 data/raw/
+
+# Exported local curator decisions
+curation-*.json
 
 # Python
 __pycache__/

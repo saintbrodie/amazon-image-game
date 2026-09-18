@@ -9,7 +9,7 @@ on:
       - "**.json"
       - "**.py"
       - "**.css"
-      - "index.html"
+      - "**.html"
       - ".github/workflows/ci.yml"
 
 concurrency:
@@ -26,6 +26,7 @@ jobs:
         run: |
           node --check game-core.js
           node --check app.js
+          node --check curate.js
       - name: Test deterministic game core
         run: node tests/test_game_core.js
       - name: Check Python syntax
