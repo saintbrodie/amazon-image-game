@@ -59,7 +59,7 @@ def extension_for(source: str, content_type: str | None, data: bytes | None = No
             return ".tif"
         if len(data) >= 12 and data[4:8] == b"ftyp" and data[8:12] in {b"avif", b"avis"}:
             return ".avif"
-        prefix = data[:1024].lstrip().casefold()
+        prefix = data[:1024].lstrip().lower()
         if prefix.startswith(b"<svg") or (prefix.startswith(b"<?xml") and b"<svg" in prefix):
             return ".svg"
 
