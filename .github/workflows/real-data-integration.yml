@@ -11,11 +11,6 @@ on:
         description: Number of playable rounds to build
         required: false
         default: "100"
-  push:
-    branches: [build/real-data-integration]
-    paths:
-      - ".github/workflows/real-data-integration.yml"
-      - "scripts/**"
 
 concurrency:
   group: real-data-${{ github.run_id }}
