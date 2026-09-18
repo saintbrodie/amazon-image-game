@@ -18,6 +18,8 @@ The repository includes a six-round original demo plus streaming data tools for 
 - Offline curation apply script with dataset-signature protection
 - Heuristic difficulty and curation-priority scoring
 - Dataset audit reports for categories, ratings, flags, image hosts, and quality distribution
+- Optional local review-image caching and exact byte deduplication
+- Optional Pillow-powered perceptual near-duplicate removal
 - Mobile-friendly, framework-free UI
 - Bundled original demo images, so the game works immediately
 - Automatic `data/rounds.json` loading with demo fallback
@@ -177,6 +179,47 @@ A signature mismatch fails by default to prevent accidentally applying curation 
 
 To make the curated pack the one the browser loads, copy or rename it to `data/rounds.json` after validation.
 
+## Cache review images locally
+
+For controlled/private deployments, or any deployment where you have the appropriate rights to host the review media, `scripts/cache_images.py` can replace remote review-image URLs with local content-addressed files.
+
+Standard-library mode caches images, removes failed downloads, and removes exact byte duplicates:
+
+```bash
+python scripts/cache_images.py data/rounds.curated.json \
+  --output data/rounds.cached.json \
+  --asset-dir assets/review-cache \
+  --public-prefix assets/review-cache
+```
+
+The downloader writes each completed image directly to disk rather than keeping the full image corpus in RAM. Cached filenames are derived from SHA-256 content hashes. The output round also records the original URL and SHA-256 digest.
+
+To enable visual near-duplicate detection, install the optional Pillow dependency:
+
+```bash
+python -m pip install -r requirements-images.txt
+```
+
+Then use a dHash Hamming-distance threshold. `4` is a conservative starting point:
+
+```bash
+python scripts/cache_images.py data/rounds.curated.json \
+  --output data/rounds.cached.json \
+  --perceptual-threshold 4
+```
+
+Useful cache options:
+
+```text
+--keep-failed              keep rounds that could not be cached
+--keep-exact-duplicates    retain multiple rounds backed by identical bytes
+--workers 12               concurrent image fetches
+--max-mb 20                per-image download limit
+--web-root .               root for resolving existing local image paths
+```
+
+`assets/review-cache/` and generated `data/rounds*.json` are ignored by Git. That is deliberate: copying a third-party image into a local cache changes the deployment model, so publishing those files should be an explicit rights-aware decision.
+
 ## Use already-downloaded raw files
 
 ```text
@@ -222,7 +265,7 @@ For fixture/debug work, `--max-review-records` and `--max-metadata-records` cap 
 7. Emit at most one round per parent product.
 8. Optionally verify selected review image URLs.
 9. Balance categories, deduplicate, shuffle, and trim the final pack.
-10. Optionally score, audit, and curate the generated rounds before deployment.
+10. Optionally score, audit, curate, cache, and image-dedupe before deployment.
 
 ## Validate a generated pack
 
@@ -280,19 +323,19 @@ python scripts/validate_dataset.py data/demo.json
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-CI runs only these lightweight checks and cancels superseded runs.
+CI runs only these lightweight checks and cancels superseded runs. Network image downloads and Pillow are intentionally not part of CI.
 
 ## GitHub Pages
 
-The game has no build step. GitHub Pages can publish the repository root directly. The bundled demo works as-is. A generated real-data pack is intentionally ignored by Git because it may be large and because publishing third-party review media should be a deliberate decision.
+The game has no build step. GitHub Pages can publish the repository root directly. The bundled demo works as-is. Generated real-data packs and cached review images are intentionally ignored by Git because they may be large and because publishing third-party review media should be a deliberate decision.
 
 ## Content and rights note
 
-This project is not affiliated with or endorsed by Amazon. The bundled demo artwork is original to this repository. The Amazon Reviews 2023 dataset contains third-party review content and customer-posted image URLs. Research-dataset availability should not be treated as an automatic grant to republish every customer image in a public or commercial game. Review the dataset terms and applicable content rights before deploying real review images publicly.
+This project is not affiliated with or endorsed by Amazon. The bundled demo artwork is original to this repository. The Amazon Reviews 2023 dataset contains third-party review content and customer-posted image URLs. Research-dataset availability should not be treated as an automatic grant to republish every customer image in a public or commercial game. Review the dataset terms and applicable content rights before deploying or caching real review images publicly.
 
 ## Next technical milestones
 
-- Perceptual-image duplicate detection
-- Optional local image cache for controlled/private deployments
-- Moderation filters for unsafe or personally identifying review images
-- Tiny API/object-storage mode for packs too large to ship as one JSON file
+- Moderation helpers for unsafe or personally identifying review images
+- Static sharding for packs too large to ship as one JSON file
+- Optional tiny API/object-storage mode for large rotating pools
+- Better image-cache pruning/reporting across repeated cache runs
