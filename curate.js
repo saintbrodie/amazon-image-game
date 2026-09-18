@@ -3,10 +3,12 @@ const DATA_SOURCES = ["data/rounds.json", "data/demo.json"];
 const state = {
   dataset: null,
   rounds: [],
+  originalOrder: new Map(),
   datasetSignature: "",
   decisions: {},
   category: "all",
   status: "undecided",
+  sort: "priority",
   filtered: [],
   index: 0,
 };
@@ -24,6 +26,9 @@ const els = {
   sourceCategory: document.querySelector("#sourceCategory"),
   productTitle: document.querySelector("#productTitle"),
   productMeta: document.querySelector("#productMeta"),
+  priorityScore: document.querySelector("#priorityScore"),
+  difficultyScore: document.querySelector("#difficultyScore"),
+  qualityFlags: document.querySelector("#qualityFlags"),
   reviewStars: document.querySelector("#reviewStars"),
   reviewTitle: document.querySelector("#reviewTitle"),
   reviewText: document.querySelector("#reviewText"),
@@ -35,6 +40,7 @@ const els = {
   nextButton: document.querySelector("#nextButton"),
   categorySelect: document.querySelector("#categorySelect"),
   statusSelect: document.querySelector("#statusSelect"),
+  sortSelect: document.querySelector("#sortSelect"),
   reviewedStat: document.querySelector("#reviewedStat"),
   keptStat: document.querySelector("#keptStat"),
   rejectedStat: document.querySelector("#rejectedStat"),
@@ -52,6 +58,10 @@ function cleanText(value, fallback = "") {
 
 function humanizeCategory(value) {
   return cleanText(value, "Other").replaceAll("_and_", " & ").replaceAll("_", " ");
+}
+
+function humanizeFlag(value) {
+  return cleanText(value).replaceAll("_", " ");
 }
 
 function categoryKey(round) {
@@ -125,11 +135,34 @@ function matchesStatus(round) {
   return decision === state.status;
 }
 
+function analysisNumber(round, field) {
+  const value = round.analysis?.[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function compareRounds(left, right) {
+  if (state.sort === "priority") {
+    const leftValue = analysisNumber(left, "curation_priority") ?? -1;
+    const rightValue = analysisNumber(right, "curation_priority") ?? -1;
+    if (rightValue !== leftValue) return rightValue - leftValue;
+  } else if (state.sort === "hardest") {
+    const leftValue = analysisNumber(left, "difficulty_score") ?? -1;
+    const rightValue = analysisNumber(right, "difficulty_score") ?? -1;
+    if (rightValue !== leftValue) return rightValue - leftValue;
+  } else if (state.sort === "easiest") {
+    const leftValue = analysisNumber(left, "difficulty_score") ?? 101;
+    const rightValue = analysisNumber(right, "difficulty_score") ?? 101;
+    if (leftValue !== rightValue) return leftValue - rightValue;
+  }
+  return (state.originalOrder.get(left.id) ?? 0) - (state.originalOrder.get(right.id) ?? 0);
+}
+
 function rebuildFilter({ preserveRoundId = null } = {}) {
   state.filtered = state.rounds.filter((round) => {
     const categoryMatch = state.category === "all" || categoryKey(round) === state.category;
     return categoryMatch && matchesStatus(round);
   });
+  state.filtered.sort(compareRounds);
 
   if (preserveRoundId) {
     const position = state.filtered.findIndex((round) => round.id === preserveRoundId);
@@ -180,6 +213,35 @@ function renderDecision(round) {
   els.decisionPill.className = `decision-pill ${decision === "undecided" ? "" : decision}`.trim();
 }
 
+function renderAnalysis(round) {
+  const analysis = round.analysis;
+  if (!analysis || typeof analysis !== "object") {
+    els.priorityScore.textContent = "Not scored";
+    els.difficultyScore.textContent = "Not scored";
+    const item = document.createElement("li");
+    item.textContent = "Run scripts/score_dataset.py to enable triage scoring";
+    item.className = "quality-note";
+    els.qualityFlags.replaceChildren(item);
+    return;
+  }
+
+  els.priorityScore.textContent = `${analysis.curation_priority ?? 0}/100`;
+  els.difficultyScore.textContent = `${analysis.difficulty_score ?? 0}/100`;
+  const flags = Array.isArray(analysis.flags) ? analysis.flags : [];
+  if (!flags.length) {
+    const item = document.createElement("li");
+    item.textContent = "No heuristic flags";
+    item.className = "quality-ok";
+    els.qualityFlags.replaceChildren(item);
+    return;
+  }
+  els.qualityFlags.replaceChildren(...flags.map((flag) => {
+    const item = document.createElement("li");
+    item.textContent = humanizeFlag(flag);
+    return item;
+  }));
+}
+
 function render() {
   renderStats();
   const round = currentRound();
@@ -200,6 +262,7 @@ function render() {
   els.reviewText.textContent = cleanText(round.review_text, "No review text.");
   renderChoiceList(round);
   renderDecision(round);
+  renderAnalysis(round);
 
   els.imageFallback.hidden = true;
   els.reviewImage.hidden = false;
@@ -325,6 +388,11 @@ function bindEvents() {
     state.index = 0;
     rebuildFilter();
   });
+  els.sortSelect.addEventListener("change", () => {
+    const currentId = currentRound()?.id || null;
+    state.sort = els.sortSelect.value;
+    rebuildFilter({ preserveRoundId: currentId });
+  });
   els.reviewImage.addEventListener("error", () => {
     els.reviewImage.hidden = true;
     els.imageFallback.hidden = false;
@@ -349,10 +417,12 @@ async function init() {
     const { payload, source } = await loadDataset();
     state.dataset = payload;
     state.rounds = payload.rounds.filter((round) => round?.id && round?.product?.title && round?.review_image);
+    state.rounds.forEach((round, index) => state.originalOrder.set(round.id, index));
     state.datasetSignature = datasetSignature(state.rounds);
     state.decisions = loadStoredDecisions();
     populateCategories();
-    els.datasetNote.textContent = `${payload.name || source} · ${state.rounds.length.toLocaleString()} rounds · signature ${state.datasetSignature}`;
+    const scored = state.rounds.filter((round) => round.analysis && typeof round.analysis === "object").length;
+    els.datasetNote.textContent = `${payload.name || source} · ${state.rounds.length.toLocaleString()} rounds · ${scored.toLocaleString()} scored · signature ${state.datasetSignature}`;
     rebuildFilter();
   } catch (error) {
     els.loadingState.textContent = `Could not load rounds: ${error.message}`;

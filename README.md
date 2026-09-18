@@ -16,6 +16,8 @@ The repository includes a six-round original demo plus streaming data tools for 
 - Broken-image skip handling
 - Browser-based keep/reject round curator
 - Offline curation apply script with dataset-signature protection
+- Heuristic difficulty and curation-priority scoring
+- Dataset audit reports for categories, ratings, flags, image hosts, and quality distribution
 - Mobile-friendly, framework-free UI
 - Bundled original demo images, so the game works immediately
 - Automatic `data/rounds.json` loading with demo fallback
@@ -94,6 +96,45 @@ Default categories:
 - `Automotive`
 - `Home_and_Kitchen`
 
+## Score and audit a pack
+
+Scoring does not use an AI model or inspect image pixels. It is a lightweight text/metadata triage layer that helps find rounds worth checking first.
+
+Annotate each round in place:
+
+```bash
+python scripts/score_dataset.py data/rounds.json
+```
+
+Or write a separate scored file:
+
+```bash
+python scripts/score_dataset.py data/rounds.json --output data/rounds.scored.json
+```
+
+Each round receives an `analysis` object containing:
+
+- `difficulty_score` from 0 to 100, based on title similarity between the correct answer and distractors
+- `curation_priority` from 0 to 100, where higher means the round has more heuristic reasons to inspect it manually
+- `flags` such as near-duplicate answers, obvious product-title leakage in review text, very weak distractors, or missing metadata
+- supporting similarity/leakage measurements and image host
+
+These values are triage aids, not objective quality judgments and not automatic moderation.
+
+Print a dataset-wide audit:
+
+```bash
+python scripts/audit_dataset.py data/rounds.json
+```
+
+Machine-readable output:
+
+```bash
+python scripts/audit_dataset.py data/rounds.json --json --output data/audit.json
+```
+
+The report includes category counts, rating distribution, difficulty buckets, curation-priority buckets, quality-flag frequency, image hosts, verified purchases, and reviews with helpful votes.
+
 ## Curate a generated pack
 
 After `data/rounds.json` exists, open:
@@ -108,7 +149,9 @@ The curator uses the same pack as the game and stores decisions locally in the b
 - `R` to reject a round
 - left/right arrows to browse
 - category and decision-status filters
+- sorting by curation priority, difficulty, or dataset order when the pack has been scored
 - image/product/review/answer inspection
+- heuristic quality flags when present
 - JSON export/import for moving decisions between browsers or machines
 
 The exported decision file records the dataset signature plus `kept_ids` and `rejected_ids`. Apply it offline:
@@ -179,7 +222,7 @@ For fixture/debug work, `--max-review-records` and `--max-metadata-records` cap 
 7. Emit at most one round per parent product.
 8. Optionally verify selected review image URLs.
 9. Balance categories, deduplicate, shuffle, and trim the final pack.
-10. Optionally curate the generated rounds before deploying them.
+10. Optionally score, audit, and curate the generated rounds before deployment.
 
 ## Validate a generated pack
 
@@ -214,7 +257,12 @@ The validator checks required fields, exactly four unique choices, correct-answe
         "parent_asin": "...",
         "source_url": "https://www.amazon.com/dp/..."
       },
-      "choices": ["Automatic Cat Water Fountain", "...", "...", "..."]
+      "choices": ["Automatic Cat Water Fountain", "...", "...", "..."],
+      "analysis": {
+        "difficulty_score": 42,
+        "curation_priority": 14,
+        "flags": ["review_may_reveal_product_title"]
+      }
     }
   ]
 }
@@ -244,7 +292,6 @@ This project is not affiliated with or endorsed by Amazon. The bundled demo artw
 
 ## Next technical milestones
 
-- Per-round difficulty based on distractor similarity
 - Perceptual-image duplicate detection
 - Optional local image cache for controlled/private deployments
 - Moderation filters for unsafe or personally identifying review images
