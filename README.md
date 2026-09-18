@@ -14,6 +14,8 @@ The repository includes a six-round original demo plus streaming data tools for 
 - Shareable daily result squares and deep links
 - Daily result persistence per dataset/date
 - Broken-image skip handling
+- Browser-based keep/reject round curator
+- Offline curation apply script with dataset-signature protection
 - Mobile-friendly, framework-free UI
 - Bundled original demo images, so the game works immediately
 - Automatic `data/rounds.json` loading with demo fallback
@@ -92,6 +94,46 @@ Default categories:
 - `Automotive`
 - `Home_and_Kitchen`
 
+## Curate a generated pack
+
+After `data/rounds.json` exists, open:
+
+```text
+http://localhost:8000/curate.html
+```
+
+The curator uses the same pack as the game and stores decisions locally in the browser. It supports:
+
+- `K` to keep a round
+- `R` to reject a round
+- left/right arrows to browse
+- category and decision-status filters
+- image/product/review/answer inspection
+- JSON export/import for moving decisions between browsers or machines
+
+The exported decision file records the dataset signature plus `kept_ids` and `rejected_ids`. Apply it offline:
+
+```bash
+python scripts/apply_curation.py \
+  --dataset data/rounds.json \
+  --decisions curation-<signature>.json \
+  --output data/rounds.curated.json
+```
+
+By default, explicitly rejected rounds are removed, explicitly kept rounds remain, and unreviewed rounds remain. For a strict hand-picked pack:
+
+```bash
+python scripts/apply_curation.py \
+  --dataset data/rounds.json \
+  --decisions curation-<signature>.json \
+  --output data/rounds.curated.json \
+  --only-kept
+```
+
+A signature mismatch fails by default to prevent accidentally applying curation to a regenerated pack. `--allow-signature-mismatch` is available when you intentionally want to apply matching round IDs across pack versions.
+
+To make the curated pack the one the browser loads, copy or rename it to `data/rounds.json` after validation.
+
 ## Use already-downloaded raw files
 
 ```text
@@ -109,7 +151,7 @@ python scripts/build_pack.py \
   --limit 1000
 ```
 
-`data/raw/` and generated `data/rounds.json` are ignored by Git by default.
+`data/raw/` and generated `data/rounds*.json` are ignored by Git by default.
 
 ## Build one category directly
 
@@ -137,6 +179,7 @@ For fixture/debug work, `--max-review-records` and `--max-metadata-records` cap 
 7. Emit at most one round per parent product.
 8. Optionally verify selected review image URLs.
 9. Balance categories, deduplicate, shuffle, and trim the final pack.
+10. Optionally curate the generated rounds before deploying them.
 
 ## Validate a generated pack
 
@@ -182,6 +225,7 @@ The validator checks required fields, exactly four unique choices, correct-answe
 ```bash
 node --check game-core.js
 node --check app.js
+node --check curate.js
 node tests/test_game_core.js
 python -m compileall -q scripts tests
 python scripts/validate_dataset.py data/demo.json

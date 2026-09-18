@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Review and curate rounds for What Did They Buy?">
+  <title>Round Curator | What Did They Buy?</title>
+  <link rel="stylesheet" href="curate.css">
+</head>
+<body>
+  <div class="shell">
+    <header class="header">
+      <div>
+        <a href="./" class="back-link">← Game</a>
+        <h1>Round Curator</h1>
+        <p>Keep the funny, clear rounds. Reject broken, boring, personal, or unfair ones.</p>
+      </div>
+      <div class="header-actions">
+        <button id="importButton" class="button secondary" type="button">Import decisions</button>
+        <input id="importInput" type="file" accept="application/json,.json" hidden>
+        <button id="exportButton" class="button" type="button">Export decisions</button>
+      </div>
+    </header>
+
+    <section class="stats" aria-label="Curation progress">
+      <div><span>Reviewed</span><strong id="reviewedStat">0</strong></div>
+      <div><span>Kept</span><strong id="keptStat">0</strong></div>
+      <div><span>Rejected</span><strong id="rejectedStat">0</strong></div>
+      <div><span>Remaining</span><strong id="remainingStat">0</strong></div>
+    </section>
+
+    <section class="toolbar">
+      <label>
+        <span>Category</span>
+        <select id="categorySelect"><option value="all">All categories</option></select>
+      </label>
+      <label>
+        <span>Status</span>
+        <select id="statusSelect">
+          <option value="undecided">Undecided</option>
+          <option value="all">All</option>
+          <option value="keep">Kept</option>
+          <option value="reject">Rejected</option>
+        </select>
+      </label>
+      <button id="previousButton" class="button secondary" type="button">Previous</button>
+      <button id="nextButton" class="button secondary" type="button">Next</button>
+      <button id="resetButton" class="button danger-quiet" type="button">Reset decisions</button>
+    </section>
+
+    <main class="card" id="curationCard">
+      <div class="loading" id="loadingState">Loading rounds…</div>
+      <div class="content" id="content" hidden>
+        <section class="image-panel">
+          <div class="image-frame">
+            <img id="reviewImage" alt="Customer review image under curation">
+            <div id="imageFallback" class="image-fallback" hidden>Image unavailable</div>
+          </div>
+          <div class="round-line">
+            <span id="positionLabel"></span>
+            <span id="roundId"></span>
+          </div>
+        </section>
+
+        <section class="details-panel">
+          <div class="decision-pill" id="decisionPill">Undecided</div>
+          <p class="eyebrow" id="sourceCategory"></p>
+          <h2 id="productTitle"></h2>
+          <p class="productMeta" id="productMeta"></p>
+
+          <div class="review-box">
+            <div class="stars" id="reviewStars"></div>
+            <strong id="reviewTitle"></strong>
+            <p id="reviewText"></p>
+          </div>
+
+          <div class="choice-box">
+            <span>Game choices</span>
+            <ol id="choiceList"></ol>
+          </div>
+
+          <a id="sourceLink" class="source-link" target="_blank" rel="noopener noreferrer" hidden>Open product source</a>
+
+          <div class="decision-actions">
+            <button id="rejectButton" class="decision-button reject" type="button"><span>R</span> Reject</button>
+            <button id="keepButton" class="decision-button keep" type="button"><span>K</span> Keep</button>
+          </div>
+          <p class="hint">R reject · K keep · ← previous · → next</p>
+        </section>
+      </div>
+    </main>
+
+    <section class="empty-state" id="emptyState" hidden>
+      <h2>Nothing matches this filter.</h2>
+      <p>Change the category/status filter, or export your decisions if you are done.</p>
+    </section>
+
+    <p class="dataset-note" id="datasetNote"></p>
+  </div>
+
+  <script src="game-core.js"></script>
+  <script src="curate.js" defer></script>
+</body>
+</html>
