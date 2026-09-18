@@ -1,5 +1,7 @@
 const DATA_SOURCES = ["data/rounds.json", "data/demo.json"];
 const DEFAULT_MODE = localStorage.getItem("mystery-cart-mode") || "photo";
+const DEFAULT_CATEGORY = localStorage.getItem("mystery-cart-category") || "all";
+const DEFAULT_ROUND_COUNT = localStorage.getItem("mystery-cart-round-count") || "10";
 
 const state = {
   dataset: null,
@@ -9,8 +11,11 @@ const state = {
   score: 0,
   correct: 0,
   streak: 0,
+  skipped: 0,
   answered: false,
   mode: DEFAULT_MODE,
+  category: DEFAULT_CATEGORY,
+  roundCount: DEFAULT_ROUND_COUNT,
 };
 
 const els = {
@@ -20,6 +25,8 @@ const els = {
   finishCard: document.querySelector("#finishCard"),
   reviewImage: document.querySelector("#reviewImage"),
   photoFallback: document.querySelector("#photoFallback"),
+  photoCaption: document.querySelector("#photoCaption"),
+  skipBrokenButton: document.querySelector("#skipBrokenButton"),
   reviewClue: document.querySelector("#reviewClue"),
   clueStars: document.querySelector("#clueStars"),
   clueTitle: document.querySelector("#clueTitle"),
@@ -47,6 +54,8 @@ const els = {
   aboutButton: document.querySelector("#aboutButton"),
   aboutDialog: document.querySelector("#aboutDialog"),
   closeAboutButton: document.querySelector("#closeAboutButton"),
+  categorySelect: document.querySelector("#categorySelect"),
+  roundCountSelect: document.querySelector("#roundCountSelect"),
   modeButtons: [...document.querySelectorAll(".mode-button")],
 };
 
@@ -57,6 +66,18 @@ function shuffle(items) {
     [copy[i], copy[j]] = [copy[j], copy[i]];
   }
   return copy;
+}
+
+function cleanText(value, fallback = "") {
+  return typeof value === "string" && value.trim() ? value.trim() : fallback;
+}
+
+function categoryKey(round) {
+  return cleanText(round.source_category) || cleanText(round.product?.category) || "Other";
+}
+
+function humanizeCategory(value) {
+  return cleanText(value, "Other").replaceAll("_and_", " & ").replaceAll("_", " ");
 }
 
 function normalizeData(payload) {
@@ -102,14 +123,13 @@ function starString(rating) {
   return `${"★".repeat(value)}${"☆".repeat(5 - value)}`;
 }
 
-function cleanText(value, fallback = "") {
-  return typeof value === "string" && value.trim() ? value.trim() : fallback;
-}
-
 function formatMeta(product) {
-  return [product.category, product.price ? `$${Number(product.price).toFixed(2)}` : null]
-    .filter(Boolean)
-    .join(" · ");
+  const category = cleanText(product.leaf_category) || cleanText(product.category);
+  return [
+    category,
+    product.price ? `$${Number(product.price).toFixed(2)}` : null,
+    cleanText(product.store),
+  ].filter(Boolean).join(" · ");
 }
 
 function setMode(mode) {
@@ -123,20 +143,55 @@ function setMode(mode) {
   els.reviewClue.hidden = state.mode !== "review";
 }
 
+function populateCategorySelect() {
+  const categories = [...new Set(state.rounds.map(categoryKey))]
+    .sort((left, right) => humanizeCategory(left).localeCompare(humanizeCategory(right)));
+
+  const options = [new Option("All categories", "all")];
+  categories.forEach((category) => options.push(new Option(humanizeCategory(category), category)));
+  els.categorySelect.replaceChildren(...options);
+
+  if (state.category !== "all" && !categories.includes(state.category)) {
+    state.category = "all";
+  }
+  els.categorySelect.value = state.category;
+}
+
+function selectedPool() {
+  if (state.category === "all") return state.rounds;
+  return state.rounds.filter((round) => categoryKey(round) === state.category);
+}
+
+function normalizedRoundCount(poolSize) {
+  if (state.roundCount === "all") return poolSize;
+  const requested = Number.parseInt(state.roundCount, 10);
+  if (!Number.isFinite(requested) || requested < 1) return Math.min(10, poolSize);
+  return Math.min(requested, poolSize);
+}
+
 function startGame() {
+  let pool = selectedPool();
+  if (!pool.length) {
+    state.category = "all";
+    els.categorySelect.value = "all";
+    pool = state.rounds;
+  }
+
   state.index = 0;
   state.score = 0;
   state.correct = 0;
   state.streak = 0;
+  state.skipped = 0;
   state.answered = false;
-  state.order = shuffle(state.rounds.map((_, index) => index));
+  state.order = shuffle(pool).slice(0, normalizedRoundCount(pool.length));
+
   els.finishCard.hidden = true;
   els.gameCard.hidden = false;
   renderRound();
 }
 
 function currentRound() {
-  return state.rounds[state.order[state.index]];
+  return state.order[state.index];
 }
 
 function renderRound() {
@@ -151,7 +206,9 @@ function renderRound() {
   els.photoFallback.hidden = true;
   els.reviewImage.hidden = false;
   els.reviewImage.alt = `Customer review photo for mystery product, round ${state.index + 1}`;
+  els.reviewImage.src = "";
   els.reviewImage.src = round.review_image;
+  els.photoCaption.textContent = `${humanizeCategory(categoryKey(round))} · customer review photo`;
 
   els.roundStatus.textContent = `${state.index + 1} / ${state.order.length}`;
   els.scoreStatus.textContent = String(state.score);
@@ -238,8 +295,7 @@ function renderReveal(round, correct, points) {
   els.revealCard.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
-function nextRound() {
-  if (!state.answered) return;
+function advanceRound() {
   state.index += 1;
   if (state.index >= state.order.length) {
     finishGame();
@@ -249,16 +305,31 @@ function nextRound() {
   }
 }
 
+function nextRound() {
+  if (!state.answered) return;
+  advanceRound();
+}
+
+function skipBrokenRound() {
+  if (state.answered) return;
+  state.skipped += 1;
+  state.streak = 0;
+  els.streakStatus.textContent = "0";
+  advanceRound();
+}
+
 function finishGame() {
   const total = state.order.length;
-  const ratio = total ? state.correct / total : 0;
+  const answeredTotal = Math.max(0, total - state.skipped);
+  const ratio = answeredTotal ? state.correct / answeredTotal : 0;
   let headline = "That was weird.";
-  if (ratio === 1) headline = "Perfect cart detective.";
+  if (answeredTotal && ratio === 1) headline = "Perfect cart detective.";
   else if (ratio >= 0.75) headline = "You know your review photos.";
   else if (ratio >= 0.5) headline = "Solid detective work.";
 
+  const skipCopy = state.skipped ? ` ${state.skipped} broken photo${state.skipped === 1 ? " was" : "s were"} skipped.` : "";
   els.finishHeadline.textContent = headline;
-  els.finishSummary.textContent = `You got ${state.correct} of ${total} products right.`;
+  els.finishSummary.textContent = `You got ${state.correct} of ${answeredTotal} answered products right.${skipCopy}`;
   els.finishScore.textContent = String(state.score);
   els.gameCard.hidden = true;
   els.finishCard.hidden = false;
@@ -270,14 +341,43 @@ function showImageFallback() {
   els.photoFallback.hidden = false;
 }
 
+function hideImageFallback() {
+  els.photoFallback.hidden = true;
+  els.reviewImage.hidden = false;
+}
+
+function updateDatasetNote(source) {
+  const label = cleanText(
+    state.dataset?.name,
+    source.endsWith("demo.json") ? "Bundled demo" : "Local dataset",
+  );
+  const categoryCount = new Set(state.rounds.map(categoryKey)).size;
+  const categoryCopy = `${categoryCount} ${categoryCount === 1 ? "category" : "categories"}`;
+  els.datasetNote.textContent = `${label} · ${state.rounds.length.toLocaleString()} playable rounds · ${categoryCopy}.`;
+}
+
 function bindEvents() {
   els.nextButton.addEventListener("click", nextRound);
   els.newGameButton.addEventListener("click", startGame);
   els.playAgainButton.addEventListener("click", startGame);
+  els.skipBrokenButton.addEventListener("click", skipBrokenRound);
   els.reviewImage.addEventListener("error", showImageFallback);
+  els.reviewImage.addEventListener("load", hideImageFallback);
 
   els.modeButtons.forEach((button) => {
     button.addEventListener("click", () => setMode(button.dataset.mode));
+  });
+
+  els.categorySelect.addEventListener("change", () => {
+    state.category = els.categorySelect.value;
+    localStorage.setItem("mystery-cart-category", state.category);
+    startGame();
+  });
+
+  els.roundCountSelect.addEventListener("change", () => {
+    state.roundCount = els.roundCountSelect.value;
+    localStorage.setItem("mystery-cart-round-count", state.roundCount);
+    startGame();
   });
 
   els.aboutButton.addEventListener("click", () => els.aboutDialog.showModal());
@@ -288,6 +388,10 @@ function bindEvents() {
 
   document.addEventListener("keydown", (event) => {
     if (els.aboutDialog.open) return;
+    if (!state.answered && !els.photoFallback.hidden && event.key.toLowerCase() === "s") {
+      skipBrokenRound();
+      return;
+    }
     if (!state.answered && /^[1-4]$/.test(event.key)) {
       const button = els.choices.querySelectorAll(".choice-button")[Number(event.key) - 1];
       button?.click();
@@ -300,16 +404,19 @@ function bindEvents() {
 async function init() {
   bindEvents();
   setMode(state.mode);
+  els.roundCountSelect.value = [...els.roundCountSelect.options].some((option) => option.value === state.roundCount)
+    ? state.roundCount
+    : "10";
+  state.roundCount = els.roundCountSelect.value;
 
   try {
     const { payload, source } = await loadDataset();
     state.dataset = payload;
     state.rounds = payload.rounds;
+    populateCategorySelect();
     els.loadingState.hidden = true;
     els.gameContent.hidden = false;
-
-    const label = cleanText(payload.name, source.endsWith("demo.json") ? "Bundled demo" : "Local dataset");
-    els.datasetNote.textContent = `${label} · ${state.rounds.length} playable rounds loaded.`;
+    updateDatasetNote(source);
     startGame();
   } catch (error) {
     els.loadingState.textContent = `Could not load game data: ${error.message}`;
