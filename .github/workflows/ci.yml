@@ -23,10 +23,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Check JavaScript syntax
-        run: node --check app.js
+        run: |
+          node --check game-core.js
+          node --check app.js
+      - name: Test deterministic game core
+        run: node tests/test_game_core.js
       - name: Check Python syntax
         run: python -m compileall -q scripts tests
       - name: Validate bundled game data
         run: python scripts/validate_dataset.py data/demo.json
-      - name: Run unit tests
-        run: python -m unittest discover -s tests -v
+      - name: Run Python unit tests
+        run: python -m unittest discover -s tests -p 'test_*.py' -v
