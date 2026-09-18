@@ -10,32 +10,51 @@ The repository includes a six-round original demo plus streaming data tools for 
 - Four-choice rounds with keyboard shortcuts
 - Score and streak bonuses
 - Category filtering and selectable game length
+- Deterministic five-round daily challenge
+- Shareable daily result squares and deep links
+- Daily result persistence per dataset/date
 - Broken-image skip handling
 - Mobile-friendly, framework-free UI
 - Bundled original demo images, so the game works immediately
 - Automatic `data/rounds.json` loading with demo fallback
 - Standard-library Python builders for local files or streamed `.jsonl.gz` URLs
 - Multi-category pack generation
-- Bounded reservoir sampling instead of loading the full corpus into memory
 - Hierarchical-category distractors with near-duplicate title rejection
-- Optional review-image URL health checks before publishing a pack
+- Optional review-image URL health checks
 - Dataset validation and lightweight CI
 
 ## Run it
-
-Clone the repo and serve the directory with any static server:
 
 ```bash
 python -m http.server 8000
 ```
 
-Then open `http://localhost:8000`.
+Then open `http://localhost:8000`. A static server is recommended because the game loads round data with `fetch()`.
 
-A server is recommended instead of opening `index.html` directly because the game loads its rounds with `fetch()`.
+## Daily challenge
+
+Click **Daily challenge** for the same five rounds and answer order for everyone using the same dataset and UTC date. A completed result is stored in local storage using both the dataset signature and date.
+
+Daily deep links use:
+
+```text
+?daily=2026-09-18
+```
+
+`?daily=1` and `?daily=today` resolve to the current UTC date. Shared results look like:
+
+```text
+What Did They Buy? Daily 2026-09-18
+4/5 · 480 pts
+🟩🟥🟩🟩🟩
+https://example.test/?daily=2026-09-18
+```
+
+The deterministic logic lives in `game-core.js` and has zero dependencies so it can be tested directly with Node.
 
 ## Build a real multi-category pack
 
-The easiest path now streams the official UCSD category archives directly. It does not keep the raw multi-gigabyte files on disk.
+The easiest path streams the official UCSD category archives directly. Raw multi-gigabyte files are not retained on disk.
 
 ```bash
 python scripts/build_pack.py \
@@ -44,7 +63,7 @@ python scripts/build_pack.py \
   --output data/rounds.json
 ```
 
-On PowerShell:
+PowerShell:
 
 ```powershell
 python scripts/build_pack.py `
@@ -53,21 +72,19 @@ python scripts/build_pack.py `
   --output data/rounds.json
 ```
 
-The builder processes categories sequentially, reservoir-samples image-bearing reviews, joins them to metadata with `parent_asin`, checks the selected review image URLs, and writes one compact pack. The source archives are large, so a five-category build transfers a significant amount of data even though it does not store the raw files locally.
+The source archives are large, so a five-category build transfers significant data even though it streams them. Image URL checks are enabled by default.
 
-To keep successful categories if one remote file fails:
+Useful options:
 
 ```bash
+# Keep successful categories if another remote category fails
 python scripts/build_pack.py --limit 2000 --continue-on-error
-```
 
-Image URL checks are enabled by default. Disable them when iterating on data logic:
-
-```bash
+# Faster data-logic iteration without selected-image health checks
 python scripts/build_pack.py --limit 500 --no-check-images
 ```
 
-The script defaults to these five game-friendly categories:
+Default categories:
 
 - `Pet_Supplies`
 - `Patio_Lawn_and_Garden`
@@ -77,8 +94,6 @@ The script defaults to these five game-friendly categories:
 
 ## Use already-downloaded raw files
 
-Put matching category pairs in one directory:
-
 ```text
 data/raw/
   Pet_Supplies.jsonl.gz
@@ -86,8 +101,6 @@ data/raw/
   Automotive.jsonl.gz
   meta_Automotive.jsonl.gz
 ```
-
-Then:
 
 ```bash
 python scripts/build_pack.py \
@@ -100,7 +113,7 @@ python scripts/build_pack.py \
 
 ## Build one category directly
 
-`scripts/build_dataset.py` accepts either local paths or HTTP(S) URLs:
+`scripts/build_dataset.py` accepts local paths or HTTP(S) URLs:
 
 ```bash
 python scripts/build_dataset.py \
@@ -111,32 +124,27 @@ python scripts/build_dataset.py \
   --limit 1000
 ```
 
-For development against a small local fixture, `--max-review-records` and `--max-metadata-records` can cap scans. Those caps are primarily debugging tools because stopping the metadata scan early may prevent sampled `parent_asin` values from being found.
+For fixture/debug work, `--max-review-records` and `--max-metadata-records` cap scans. Metadata caps can reduce successful joins and are not recommended for final packs.
 
-## How round generation works
+## Round generation
 
 1. Stream review records and reservoir-sample reviews containing customer images.
-2. Collect sampled `parent_asin` values.
-3. Stream matching product metadata.
-4. Keep metadata for sampled products plus a bounded distractor reservoir.
-5. Normalize both known Amazon metadata image representations and numeric/string prices.
-6. Use hierarchical product categories to rank plausible distractors.
-7. Reject very similar listing titles that would make an answer ambiguous.
-8. Emit at most one review round per parent product.
-9. For multi-category packs, optionally verify selected review image URLs and remove dead ones.
-10. Shuffle and trim the final pack to the requested size.
-
-The seed is deterministic. Change `--seed` for a different sample.
+2. Join sampled reviews to metadata with `parent_asin`.
+3. Keep a bounded metadata reservoir for distractors.
+4. Normalize known image representations and numeric/string prices.
+5. Use hierarchical categories to rank plausible wrong answers.
+6. Reject near-duplicate listing titles that make answers ambiguous.
+7. Emit at most one round per parent product.
+8. Optionally verify selected review image URLs.
+9. Balance categories, deduplicate, shuffle, and trim the final pack.
 
 ## Validate a generated pack
-
-Before using or publishing generated data:
 
 ```bash
 python scripts/validate_dataset.py data/rounds.json
 ```
 
-The validator checks required round fields, four unique choices, correct-answer presence, duplicate round IDs, duplicate `parent_asin` products, ratings, and image references.
+The validator checks required fields, exactly four unique choices, correct-answer presence, duplicate IDs/products, ratings, and image references.
 
 ## Output shape
 
@@ -163,12 +171,7 @@ The validator checks required round fields, four unique choices, correct-answer 
         "parent_asin": "...",
         "source_url": "https://www.amazon.com/dp/..."
       },
-      "choices": [
-        "Automatic Cat Water Fountain",
-        "...",
-        "...",
-        "..."
-      ]
+      "choices": ["Automatic Cat Water Fountain", "...", "...", "..."]
     }
   ]
 }
@@ -177,10 +180,12 @@ The validator checks required round fields, four unique choices, correct-answer 
 ## Tests
 
 ```bash
+node --check game-core.js
 node --check app.js
+node tests/test_game_core.js
 python -m compileall -q scripts tests
 python scripts/validate_dataset.py data/demo.json
-python -m unittest discover -s tests -v
+python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
 CI runs only these lightweight checks and cancels superseded runs.
@@ -191,11 +196,10 @@ The game has no build step. GitHub Pages can publish the repository root directl
 
 ## Content and rights note
 
-This project is not affiliated with or endorsed by Amazon. The bundled demo artwork is original to this repository. The Amazon Reviews 2023 dataset contains third-party review content and customer-posted image URLs. Its availability as a research dataset should not be treated as an automatic grant to republish every customer image in a public or commercial game. Review the dataset terms and applicable content rights before deploying real review images publicly.
+This project is not affiliated with or endorsed by Amazon. The bundled demo artwork is original to this repository. The Amazon Reviews 2023 dataset contains third-party review content and customer-posted image URLs. Research-dataset availability should not be treated as an automatic grant to republish every customer image in a public or commercial game. Review the dataset terms and applicable content rights before deploying real review images publicly.
 
 ## Next technical milestones
 
-- Deterministic daily challenge and shareable score card
 - Per-round difficulty based on distractor similarity
 - Perceptual-image duplicate detection
 - Optional local image cache for controlled/private deployments

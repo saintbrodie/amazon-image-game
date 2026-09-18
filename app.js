@@ -5,6 +5,7 @@ const DEFAULT_ROUND_COUNT = localStorage.getItem("mystery-cart-round-count") || 
 
 const state = {
   dataset: null,
+  datasetSignature: "",
   rounds: [],
   order: [],
   index: 0,
@@ -13,9 +14,12 @@ const state = {
   streak: 0,
   skipped: 0,
   answered: false,
+  outcomes: [],
   mode: DEFAULT_MODE,
   category: DEFAULT_CATEGORY,
   roundCount: DEFAULT_ROUND_COUNT,
+  daily: false,
+  dailyDate: null,
 };
 
 const els = {
@@ -46,16 +50,23 @@ const els = {
   sourceLink: document.querySelector("#sourceLink"),
   nextButton: document.querySelector("#nextButton"),
   newGameButton: document.querySelector("#newGameButton"),
+  dailyButton: document.querySelector("#dailyButton"),
   playAgainButton: document.querySelector("#playAgainButton"),
   finishHeadline: document.querySelector("#finishHeadline"),
   finishSummary: document.querySelector("#finishSummary"),
   finishScore: document.querySelector("#finishScore"),
+  resultSquares: document.querySelector("#resultSquares"),
+  shareButton: document.querySelector("#shareButton"),
+  shareStatus: document.querySelector("#shareStatus"),
   datasetNote: document.querySelector("#datasetNote"),
   aboutButton: document.querySelector("#aboutButton"),
   aboutDialog: document.querySelector("#aboutDialog"),
   closeAboutButton: document.querySelector("#closeAboutButton"),
   categorySelect: document.querySelector("#categorySelect"),
   roundCountSelect: document.querySelector("#roundCountSelect"),
+  challengeBanner: document.querySelector("#challengeBanner"),
+  challengeTitle: document.querySelector("#challengeTitle"),
+  challengeDate: document.querySelector("#challengeDate"),
   modeButtons: [...document.querySelectorAll(".mode-button")],
 };
 
@@ -87,6 +98,7 @@ function normalizeData(payload) {
 
   const rounds = payload.rounds.filter((round) => {
     return round
+      && round.id
       && round.review_image
       && round.product?.title
       && Array.isArray(round.choices)
@@ -169,21 +181,107 @@ function normalizedRoundCount(poolSize) {
   return Math.min(requested, poolSize);
 }
 
-function startGame() {
-  let pool = selectedPool();
-  if (!pool.length) {
-    state.category = "all";
-    els.categorySelect.value = "all";
-    pool = state.rounds;
-  }
-
+function resetScoreState() {
   state.index = 0;
   state.score = 0;
   state.correct = 0;
   state.streak = 0;
   state.skipped = 0;
   state.answered = false;
+  state.outcomes = [];
+  els.scoreStatus.textContent = "0";
+  els.streakStatus.textContent = "0";
+  els.shareStatus.textContent = "";
+}
+
+function setDailyUrl(dateKey) {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("daily");
+  if (dateKey) url.searchParams.set("daily", dateKey);
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function setDailyUi(active, dateKey = null) {
+  els.challengeBanner.hidden = !active;
+  els.categorySelect.disabled = active;
+  els.roundCountSelect.disabled = active;
+  els.modeButtons.forEach((button) => { button.disabled = active; });
+  els.dailyButton.classList.toggle("is-active", active);
+  if (active) {
+    els.challengeTitle.textContent = "Daily challenge";
+    els.challengeDate.textContent = dateKey;
+  }
+}
+
+function startNormalGame() {
+  state.daily = false;
+  state.dailyDate = null;
+  setDailyUi(false);
+  setDailyUrl(null);
+  setMode(state.mode);
+  resetScoreState();
+
+  let pool = selectedPool();
+  if (!pool.length) {
+    state.category = "all";
+    els.categorySelect.value = "all";
+    pool = state.rounds;
+  }
   state.order = shuffle(pool).slice(0, normalizedRoundCount(pool.length));
+
+  els.finishCard.hidden = true;
+  els.gameCard.hidden = false;
+  renderRound();
+}
+
+function dailyStorageKey(dateKey) {
+  return `mystery-cart-daily:${state.datasetSignature}:${dateKey}`;
+}
+
+function readSavedDaily(dateKey) {
+  try {
+    const raw = localStorage.getItem(dailyStorageKey(dateKey));
+    if (!raw) return null;
+    const value = JSON.parse(raw);
+    if (!value || !Array.isArray(value.outcomes)) return null;
+    return value;
+  } catch {
+    return null;
+  }
+}
+
+function saveDailyResult() {
+  if (!state.daily || !state.dailyDate) return;
+  const payload = {
+    score: state.score,
+    correct: state.correct,
+    skipped: state.skipped,
+    outcomes: state.outcomes,
+  };
+  localStorage.setItem(dailyStorageKey(state.dailyDate), JSON.stringify(payload));
+}
+
+function startDailyGame(dateKey = GameCore.utcDateKey()) {
+  const resolvedDate = GameCore.isDateKey(dateKey) ? dateKey : GameCore.utcDateKey();
+  state.daily = true;
+  state.dailyDate = resolvedDate;
+  setMode("photo");
+  setDailyUi(true, resolvedDate);
+  setDailyUrl(resolvedDate);
+  resetScoreState();
+  state.order = GameCore.dailyRounds(state.rounds, resolvedDate, 5);
+
+  const saved = readSavedDaily(resolvedDate);
+  if (saved) {
+    state.score = Number(saved.score) || 0;
+    state.correct = Number(saved.correct) || 0;
+    state.skipped = Number(saved.skipped) || 0;
+    state.outcomes = saved.outcomes.slice(0, state.order.length);
+    while (state.outcomes.length < state.order.length) state.outcomes.push("skipped");
+    state.index = state.order.length;
+    finishGame({ restored: true });
+    return;
+  }
 
   els.finishCard.hidden = true;
   els.gameCard.hidden = false;
@@ -192,6 +290,12 @@ function startGame() {
 
 function currentRound() {
   return state.order[state.index];
+}
+
+function roundChoices(round) {
+  const choices = round.choices.slice(0, 4);
+  if (state.daily) return GameCore.dailyChoices(choices, state.dailyDate, round.id);
+  return shuffle(choices);
 }
 
 function renderRound() {
@@ -220,8 +324,7 @@ function renderRound() {
   els.clueText.textContent = cleanText(round.review_text, "No review text included.");
   els.reviewClue.hidden = state.mode !== "review";
 
-  const choices = shuffle(round.choices.slice(0, 4));
-  els.choices.replaceChildren(...choices.map((choice, index) => makeChoice(choice, index)));
+  els.choices.replaceChildren(...roundChoices(round).map((choice, index) => makeChoice(choice, index)));
 }
 
 function makeChoice(choice, index) {
@@ -255,8 +358,10 @@ function answer(choice, selectedButton) {
     state.correct += 1;
     points = 100 + Math.min(state.streak - 1, 5) * 20;
     state.score += points;
+    state.outcomes[state.index] = "correct";
   } else {
     state.streak = 0;
+    state.outcomes[state.index] = "wrong";
   }
 
   [...els.choices.querySelectorAll(".choice-button")].forEach((button) => {
@@ -314,25 +419,42 @@ function skipBrokenRound() {
   if (state.answered) return;
   state.skipped += 1;
   state.streak = 0;
+  state.outcomes[state.index] = "skipped";
   els.streakStatus.textContent = "0";
   advanceRound();
 }
 
-function finishGame() {
+function finishGame({ restored = false } = {}) {
   const total = state.order.length;
+  while (state.outcomes.length < total) state.outcomes.push("skipped");
   const answeredTotal = Math.max(0, total - state.skipped);
-  const ratio = answeredTotal ? state.correct / answeredTotal : 0;
+  const ratio = total ? state.correct / total : 0;
   let headline = "That was weird.";
-  if (answeredTotal && ratio === 1) headline = "Perfect cart detective.";
+  if (total && ratio === 1) headline = "Perfect cart detective.";
   else if (ratio >= 0.75) headline = "You know your review photos.";
   else if (ratio >= 0.5) headline = "Solid detective work.";
 
   const skipCopy = state.skipped ? ` ${state.skipped} broken photo${state.skipped === 1 ? " was" : "s were"} skipped.` : "";
-  els.finishHeadline.textContent = headline;
-  els.finishSummary.textContent = `You got ${state.correct} of ${answeredTotal} answered products right.${skipCopy}`;
+  els.finishHeadline.textContent = restored ? "Today's result" : headline;
+  els.finishSummary.textContent = state.daily
+    ? `You got ${state.correct} of ${total} daily products right.${skipCopy}`
+    : `You got ${state.correct} of ${answeredTotal} answered products right.${skipCopy}`;
   els.finishScore.textContent = String(state.score);
   els.gameCard.hidden = true;
   els.finishCard.hidden = false;
+
+  if (state.daily) {
+    saveDailyResult();
+    els.resultSquares.textContent = GameCore.resultSquares(state.outcomes.slice(0, total));
+    els.resultSquares.hidden = false;
+    els.shareButton.hidden = false;
+    els.playAgainButton.textContent = "Play another game";
+  } else {
+    els.resultSquares.hidden = true;
+    els.shareButton.hidden = true;
+    els.playAgainButton.textContent = "Play again";
+  }
+
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -356,10 +478,75 @@ function updateDatasetNote(source) {
   els.datasetNote.textContent = `${label} · ${state.rounds.length.toLocaleString()} playable rounds · ${categoryCopy}.`;
 }
 
+function dailyShareUrl() {
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("daily", state.dailyDate);
+  url.hash = "";
+  return url.toString();
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.append(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+async function shareDailyResult() {
+  if (!state.daily || !state.dailyDate) return;
+  const text = GameCore.buildDailyShare({
+    dateKey: state.dailyDate,
+    correct: state.correct,
+    total: state.order.length,
+    score: state.score,
+    outcomes: state.outcomes.slice(0, state.order.length),
+    url: dailyShareUrl(),
+  });
+
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: "What Did They Buy?", text });
+      els.shareStatus.textContent = "Shared.";
+    } else {
+      await copyText(text);
+      els.shareStatus.textContent = "Result copied to clipboard.";
+    }
+  } catch (error) {
+    if (error?.name !== "AbortError") {
+      try {
+        await copyText(text);
+        els.shareStatus.textContent = "Result copied to clipboard.";
+      } catch {
+        els.shareStatus.textContent = "Could not share automatically.";
+      }
+    }
+  }
+}
+
+function requestedDailyDate() {
+  const value = new URLSearchParams(window.location.search).get("daily");
+  if (value === "1" || value === "today") return GameCore.utcDateKey();
+  return GameCore.isDateKey(value) ? value : null;
+}
+
 function bindEvents() {
   els.nextButton.addEventListener("click", nextRound);
-  els.newGameButton.addEventListener("click", startGame);
-  els.playAgainButton.addEventListener("click", startGame);
+  els.newGameButton.addEventListener("click", startNormalGame);
+  els.dailyButton.addEventListener("click", () => startDailyGame());
+  els.playAgainButton.addEventListener("click", () => {
+    if (state.daily) startNormalGame();
+    else startNormalGame();
+  });
+  els.shareButton.addEventListener("click", shareDailyResult);
   els.skipBrokenButton.addEventListener("click", skipBrokenRound);
   els.reviewImage.addEventListener("error", showImageFallback);
   els.reviewImage.addEventListener("load", hideImageFallback);
@@ -371,13 +558,13 @@ function bindEvents() {
   els.categorySelect.addEventListener("change", () => {
     state.category = els.categorySelect.value;
     localStorage.setItem("mystery-cart-category", state.category);
-    startGame();
+    startNormalGame();
   });
 
   els.roundCountSelect.addEventListener("change", () => {
     state.roundCount = els.roundCountSelect.value;
     localStorage.setItem("mystery-cart-round-count", state.roundCount);
-    startGame();
+    startNormalGame();
   });
 
   els.aboutButton.addEventListener("click", () => els.aboutDialog.showModal());
@@ -413,11 +600,17 @@ async function init() {
     const { payload, source } = await loadDataset();
     state.dataset = payload;
     state.rounds = payload.rounds;
+    state.datasetSignature = GameCore.hashString(
+      state.rounds.map((round) => round.id).sort().join("|"),
+    ).toString(16);
     populateCategorySelect();
     els.loadingState.hidden = true;
     els.gameContent.hidden = false;
     updateDatasetNote(source);
-    startGame();
+
+    const dailyDate = requestedDailyDate();
+    if (dailyDate) startDailyGame(dailyDate);
+    else startNormalGame();
   } catch (error) {
     els.loadingState.textContent = `Could not load game data: ${error.message}`;
     console.error(error);

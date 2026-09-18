@@ -7,6 +7,7 @@
   <title>What Did They Buy?</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="controls.css">
+  <link rel="stylesheet" href="daily.css">
 </head>
 <body>
   <div class="page-shell">
@@ -47,8 +48,16 @@
             </select>
           </label>
         </div>
-        <button class="secondary-button" id="newGameButton" type="button">New game</button>
+        <div class="toolbar-actions">
+          <button class="daily-button" id="dailyButton" type="button">Daily challenge</button>
+          <button class="secondary-button" id="newGameButton" type="button">New game</button>
+        </div>
       </section>
+
+      <div class="challenge-banner" id="challengeBanner" hidden>
+        <strong id="challengeTitle">Daily challenge</strong>
+        <span id="challengeDate"></span>
+      </div>
 
       <section class="status-row" aria-label="Game status">
         <div><span class="status-label">Round</span><strong id="roundStatus">1 / 6</strong></div>
@@ -108,7 +117,12 @@
         <h2 id="finishHeadline">Nice work.</h2>
         <p id="finishSummary"></p>
         <div class="finish-score"><strong id="finishScore">0</strong><span>points</span></div>
-        <button class="primary-button" id="playAgainButton" type="button">Play again</button>
+        <div class="result-squares" id="resultSquares" hidden aria-label="Daily challenge results"></div>
+        <div class="finish-actions">
+          <button class="primary-button" id="playAgainButton" type="button">Play again</button>
+          <button class="secondary-button share-button" id="shareButton" type="button" hidden>Share daily result</button>
+        </div>
+        <p class="share-status" id="shareStatus" role="status"></p>
       </section>
 
       <p class="dataset-note" id="datasetNote"></p>
@@ -119,11 +133,13 @@
     <button class="dialog-close" id="closeAboutButton" type="button" aria-label="Close">×</button>
     <p class="eyebrow">About the game</p>
     <h2>What Did They Buy?</h2>
-    <p>Guess products from customer review photos. The bundled demo uses original mock images. The data tools can turn image-bearing Amazon Reviews 2023 records into game rounds without live-scraping Amazon.</p>
+    <p>Guess products from customer review photos. The daily challenge selects the same five rounds and answer order for everyone using the same dataset and UTC date.</p>
+    <p>The bundled demo uses original mock images. The data tools can turn image-bearing Amazon Reviews 2023 records into game rounds without live-scraping Amazon.</p>
     <p>This project is not affiliated with or endorsed by Amazon. Review images and metadata from third-party datasets may have separate rights and usage restrictions. Check those terms before publishing a dataset-backed deployment.</p>
   </dialog>
 
   <noscript>This game needs JavaScript enabled.</noscript>
+  <script src="game-core.js"></script>
   <script src="app.js" defer></script>
 </body>
 </html>
