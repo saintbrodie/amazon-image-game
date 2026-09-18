@@ -3,6 +3,9 @@ data/rounds*.json
 data/audit*.json
 data/raw/
 
+# Optional locally cached third-party review images
+assets/review-cache/
+
 # Exported local curator decisions
 curation-*.json
 
