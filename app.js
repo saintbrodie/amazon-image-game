@@ -16,6 +16,7 @@ const state = {
   answered: false,
   outcomes: [],
   mode: DEFAULT_MODE,
+  normalMode: DEFAULT_MODE,
   category: DEFAULT_CATEGORY,
   roundCount: DEFAULT_ROUND_COUNT,
   daily: false,
@@ -144,9 +145,12 @@ function formatMeta(product) {
   ].filter(Boolean).join(" · ");
 }
 
-function setMode(mode) {
+function setMode(mode, { persist = true } = {}) {
   state.mode = mode === "review" ? "review" : "photo";
-  localStorage.setItem("mystery-cart-mode", state.mode);
+  if (persist) {
+    state.normalMode = state.mode;
+    localStorage.setItem("mystery-cart-mode", state.mode);
+  }
   els.modeButtons.forEach((button) => {
     const active = button.dataset.mode === state.mode;
     button.classList.toggle("is-active", active);
@@ -218,7 +222,7 @@ function startNormalGame() {
   state.dailyDate = null;
   setDailyUi(false);
   setDailyUrl(null);
-  setMode(state.mode);
+  setMode(state.normalMode);
   resetScoreState();
 
   let pool = selectedPool();
@@ -265,7 +269,7 @@ function startDailyGame(dateKey = GameCore.utcDateKey()) {
   const resolvedDate = GameCore.isDateKey(dateKey) ? dateKey : GameCore.utcDateKey();
   state.daily = true;
   state.dailyDate = resolvedDate;
-  setMode("photo");
+  setMode("photo", { persist: false });
   setDailyUi(true, resolvedDate);
   setDailyUrl(resolvedDate);
   resetScoreState();
