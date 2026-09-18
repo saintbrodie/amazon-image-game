@@ -45,6 +45,21 @@ def deterministic_round_order(rounds: list[dict[str, Any]], seed: int) -> list[d
     return sorted(rounds, key=key)
 
 
+def safe_shard_prefix(value: str) -> PurePosixPath:
+    raw = str(value).strip()
+    path = PurePosixPath(raw)
+    if (
+        not raw
+        or raw.startswith("/")
+        or "\\" in raw
+        or path.is_absolute()
+        or ".." in path.parts
+        or path.name in {"", ".", ".."}
+    ):
+        raise ValueError("shard_prefix must be a safe manifest-relative path")
+    return path
+
+
 def shard_dataset(
     payload: dict[str, Any],
     *,
@@ -74,7 +89,7 @@ def shard_dataset(
     shards: list[tuple[str, dict[str, Any]]] = []
     shard_manifest: list[dict[str, Any]] = []
     index: list[dict[str, str]] = []
-    shard_prefix_path = PurePosixPath(shard_prefix.strip("/"))
+    shard_prefix_path = safe_shard_prefix(shard_prefix)
 
     total_shards = (len(ordered) + shard_size - 1) // shard_size
     width = max(4, len(str(total_shards)))
