@@ -6,7 +6,7 @@ on:
       category:
         description: Amazon Reviews 2023 category key
         required: false
-        default: Pet_Supplies
+        default: All_Beauty
       limit:
         description: Number of playable rounds to build
         required: false
@@ -26,16 +26,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      CATEGORY: ${{ inputs.category || 'Pet_Supplies' }}
+      CATEGORY: ${{ inputs.category || 'All_Beauty' }}
       ROUND_LIMIT: ${{ inputs.limit || '100' }}
+      HF_RAW_BASE: https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show source archive headers
+      - name: Show source file headers
         run: |
           set -euxo pipefail
-          curl -fsSIL --max-time 30 "https://datarepo.eng.ucsd.edu/mcauley_group/data/amazon_2023/raw/review_categories/${CATEGORY}.jsonl.gz" | tail -n 20 || true
-          curl -fsSIL --max-time 30 "https://datarepo.eng.ucsd.edu/mcauley_group/data/amazon_2023/raw/meta_categories/meta_${CATEGORY}.jsonl.gz" | tail -n 20 || true
+          curl -fsSIL --max-time 30 "${HF_RAW_BASE}/review_categories/${CATEGORY}.jsonl" | tail -n 20 || true
+          curl -fsSIL --max-time 30 "${HF_RAW_BASE}/meta_categories/meta_${CATEGORY}.jsonl" | tail -n 20 || true
 
       - name: Build real review-photo pack
         run: |
