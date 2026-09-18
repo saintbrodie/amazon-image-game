@@ -1,0 +1,60 @@
+name: Apply daily preference fix
+
+on:
+  push:
+    branches: [fix/daily-mode-preference]
+    paths:
+      - ".github/workflows/apply-daily-preference-fix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/daily-mode-preference
+      - name: Patch app mode persistence
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app.js")
+          text = path.read_text(encoding="utf-8")
+          replacements = [
+              (
+                  '  mode: DEFAULT_MODE,\n  category: DEFAULT_CATEGORY,',
+                  '  mode: DEFAULT_MODE,\n  normalMode: DEFAULT_MODE,\n  category: DEFAULT_CATEGORY,',
+              ),
+              (
+                  'function setMode(mode) {\n  state.mode = mode === "review" ? "review" : "photo";\n  localStorage.setItem("mystery-cart-mode", state.mode);',
+                  'function setMode(mode, { persist = true } = {}) {\n  state.mode = mode === "review" ? "review" : "photo";\n  if (persist) {\n    state.normalMode = state.mode;\n    localStorage.setItem("mystery-cart-mode", state.mode);\n  }',
+              ),
+              (
+                  '  setDailyUrl(null);\n  setMode(state.mode);\n  resetScoreState();',
+                  '  setDailyUrl(null);\n  setMode(state.normalMode);\n  resetScoreState();',
+              ),
+              (
+                  '  state.daily = true;\n  state.dailyDate = resolvedDate;\n  setMode("photo");',
+                  '  state.daily = true;\n  state.dailyDate = resolvedDate;\n  setMode("photo", { persist: false });',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"Expected source block not found:\n{old}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+          node --check app.js
+          git diff --check
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.js
+          git commit -m "Preserve normal clue mode across daily challenge"
+          git push origin HEAD:fix/daily-mode-preference
