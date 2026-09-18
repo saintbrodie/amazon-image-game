@@ -18,8 +18,8 @@ on:
       - "scripts/**"
 
 concurrency:
-  group: real-data-${{ github.ref }}
-  cancel-in-progress: true
+  group: real-data-${{ github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   real-data:
