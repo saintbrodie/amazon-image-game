@@ -2,7 +2,7 @@
 
 A browser game where you see a mysterious customer review photo and guess which product the reviewer bought.
 
-The repository includes a six-round original demo plus streaming data tools for the [McAuley Lab Amazon Reviews 2023 dataset](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023). No live Amazon-page scraping is required.
+The repository includes an original bundled demo plus streaming tools for the [McAuley Lab Amazon Reviews 2023 dataset](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023). The game does not scrape live Amazon product pages.
 
 ## Features
 
@@ -10,57 +10,41 @@ The repository includes a six-round original demo plus streaming data tools for 
 - Four-choice rounds with keyboard shortcuts
 - Score and streak bonuses
 - Category filtering and selectable game length
-- Deterministic five-round daily challenge
-- Shareable daily result squares and deep links
-- Daily result persistence per dataset/date
+- Deterministic five-round daily challenge with shareable results
 - Broken-image skip handling
-- Browser-based keep/reject round curator
-- Offline curation apply script with dataset-signature protection
+- Browser-based keep/reject curator
 - Heuristic difficulty and curation-priority scoring
-- Dataset audit reports for categories, ratings, flags, image hosts, and quality distribution
-- Optional local review-image caching and exact byte deduplication
-- Optional Pillow-powered perceptual near-duplicate removal
+- Dataset audit reports
+- Optional local review-image caching
+- Exact and optional perceptual image deduplication
+- Streaming Amazon Reviews 2023 ingestion with bounded memory
+- Pack-level distractor reranking for more plausible wrong answers
 - Mobile-friendly, framework-free UI
-- Bundled original demo images, so the game works immediately
-- Automatic `data/rounds.json` loading with demo fallback
-- Standard-library Python builders for local files or streamed `.jsonl.gz` URLs
-- Multi-category pack generation
-- Hierarchical-category distractors with near-duplicate title rejection
-- Optional review-image URL health checks
-- Dataset validation and lightweight CI
+- Lightweight unit CI plus an optional real-data integration workflow
 
-## Run it
+## Run the game
 
 ```bash
 python -m http.server 8000
 ```
 
-Then open `http://localhost:8000`. A static server is recommended because the game loads round data with `fetch()`.
+Open `http://localhost:8000`.
+
+The browser first tries `data/rounds.json` and falls back to the bundled `data/demo.json`.
 
 ## Daily challenge
 
-Click **Daily challenge** for the same five rounds and answer order for everyone using the same dataset and UTC date. A completed result is stored in local storage using both the dataset signature and date.
-
-Daily deep links use:
+Daily mode deterministically selects the same five round IDs and answer order for a given UTC date and dataset.
 
 ```text
 ?daily=2026-09-18
 ```
 
-`?daily=1` and `?daily=today` resolve to the current UTC date. Shared results look like:
+`?daily=1` and `?daily=today` resolve to the current UTC date. Completed results are stored locally per dataset signature/date and can be shared as result squares.
 
-```text
-What Did They Buy? Daily 2026-09-18
-4/5 · 480 pts
-🟩🟥🟩🟩🟩
-https://example.test/?daily=2026-09-18
-```
+## Build a real Amazon Reviews 2023 pack
 
-The deterministic logic lives in `game-core.js` and has zero dependencies so it can be tested directly with Node.
-
-## Build a real multi-category pack
-
-The easiest path streams the official UCSD category archives directly. Raw multi-gigabyte files are not retained on disk.
+The builder streams the current raw `.jsonl` files directly from the official McAuley Lab Hugging Face dataset repository. It does not retain the multi-gigabyte source files on disk.
 
 ```bash
 python scripts/build_pack.py \
@@ -78,112 +62,132 @@ python scripts/build_pack.py `
   --output data/rounds.json
 ```
 
-The source archives are large, so a five-category build transfers significant data even though it streams them. Image URL checks are enabled by default.
+The current source layout is:
+
+```text
+https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw/review_categories/<CATEGORY>.jsonl
+https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw/meta_categories/meta_<CATEGORY>.jsonl
+```
+
+The files vary dramatically in size. `All_Beauty` is useful for a quick real-data smoke test. Categories such as Pet Supplies, Automotive, and Home & Kitchen are multi-gigabyte streams.
 
 Useful options:
 
 ```bash
-# Keep successful categories if another remote category fails
+# Keep successful categories if another source fails
 python scripts/build_pack.py --limit 2000 --continue-on-error
 
-# Faster data-logic iteration without selected-image health checks
+# Skip live review-image checks while iterating on data logic
 python scripts/build_pack.py --limit 500 --no-check-images
+
+# Development-only scan caps
+python scripts/build_pack.py \
+  --categories All_Beauty \
+  --limit 50 \
+  --max-review-records 100000 \
+  --max-metadata-records 100000
 ```
 
-Default categories:
+Metadata scan caps can prevent sampled `parent_asin` values from being found, so do not use them for a final pack unless you understand that tradeoff.
 
-- `Pet_Supplies`
-- `Patio_Lawn_and_Garden`
-- `Tools_and_Home_Improvement`
-- `Automotive`
-- `Home_and_Kitchen`
+### Distractor selection
 
-## Score and audit a pack
+The streaming joiner first builds plausible choices from a bounded metadata reservoir. During final pack assembly, `scripts/pack_choices.py` pools those candidate titles by source category and reranks them against each correct product title. Very similar titles are rejected to reduce ambiguous model/variant questions.
 
-Scoring does not use an AI model or inspect image pixels. It is a lightweight text/metadata triage layer that helps find rounds worth checking first.
+This second pass is intentionally cheap. It improves choice quality without downloading metadata twice or loading an entire Amazon category into memory.
 
-Annotate each round in place:
+## Use already-downloaded raw files
+
+Both `.jsonl` and `.jsonl.gz` local sources are supported:
+
+```text
+data/raw/
+  All_Beauty.jsonl
+  meta_All_Beauty.jsonl
+  Pet_Supplies.jsonl.gz
+  meta_Pet_Supplies.jsonl.gz
+```
 
 ```bash
-python scripts/score_dataset.py data/rounds.json
+python scripts/build_pack.py \
+  --categories All_Beauty Pet_Supplies \
+  --raw-dir data/raw \
+  --limit 1000
 ```
 
-Or write a separate scored file:
+## Build one category directly
+
+`scripts/build_dataset.py` accepts local paths or HTTP(S) URLs:
+
+```bash
+python scripts/build_dataset.py \
+  --reviews https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw/review_categories/All_Beauty.jsonl \
+  --metadata https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw/meta_categories/meta_All_Beauty.jsonl \
+  --source-category All_Beauty \
+  --output data/rounds.json \
+  --limit 100
+```
+
+## Validate, score, and audit
+
+Validate structural correctness:
+
+```bash
+python scripts/validate_dataset.py data/rounds.json
+```
+
+Annotate rounds with heuristic difficulty and curation-priority information:
 
 ```bash
 python scripts/score_dataset.py data/rounds.json --output data/rounds.scored.json
 ```
 
-Each round receives an `analysis` object containing:
-
-- `difficulty_score` from 0 to 100, based on title similarity between the correct answer and distractors
-- `curation_priority` from 0 to 100, where higher means the round has more heuristic reasons to inspect it manually
-- `flags` such as near-duplicate answers, obvious product-title leakage in review text, very weak distractors, or missing metadata
-- supporting similarity/leakage measurements and image host
-
-These values are triage aids, not objective quality judgments and not automatic moderation.
-
 Print a dataset-wide audit:
 
 ```bash
-python scripts/audit_dataset.py data/rounds.json
+python scripts/audit_dataset.py data/rounds.scored.json
 ```
 
-Machine-readable output:
+Machine-readable audit:
 
 ```bash
-python scripts/audit_dataset.py data/rounds.json --json --output data/audit.json
+python scripts/audit_dataset.py data/rounds.scored.json --json --output data/audit.json
 ```
 
-The report includes category counts, rating distribution, difficulty buckets, curation-priority buckets, quality-flag frequency, image hosts, verified purchases, and reviews with helpful votes.
+The audit includes category counts, ratings, difficulty buckets, quality flags, review-image hosts, verified-purchase counts, and helpful-vote counts. Scores are triage aids, not ground truth.
 
 ## Curate a generated pack
 
-After `data/rounds.json` exists, open:
+Serve the repo and open:
 
 ```text
 http://localhost:8000/curate.html
 ```
 
-The curator uses the same pack as the game and stores decisions locally in the browser. It supports:
+The curator supports:
 
-- `K` to keep a round
-- `R` to reject a round
-- left/right arrows to browse
-- category and decision-status filters
-- sorting by curation priority, difficulty, or dataset order when the pack has been scored
-- image/product/review/answer inspection
-- heuristic quality flags when present
-- JSON export/import for moving decisions between browsers or machines
+- `K` to keep
+- `R` to reject
+- left/right arrows to navigate
+- category and decision filters
+- sorting by curation priority or difficulty
+- review/product/choice inspection
+- portable JSON decision export/import
 
-The exported decision file records the dataset signature plus `kept_ids` and `rejected_ids`. Apply it offline:
+Apply exported decisions offline:
 
 ```bash
 python scripts/apply_curation.py \
-  --dataset data/rounds.json \
+  --dataset data/rounds.scored.json \
   --decisions curation-<signature>.json \
   --output data/rounds.curated.json
 ```
 
-By default, explicitly rejected rounds are removed, explicitly kept rounds remain, and unreviewed rounds remain. For a strict hand-picked pack:
-
-```bash
-python scripts/apply_curation.py \
-  --dataset data/rounds.json \
-  --decisions curation-<signature>.json \
-  --output data/rounds.curated.json \
-  --only-kept
-```
-
-A signature mismatch fails by default to prevent accidentally applying curation to a regenerated pack. `--allow-signature-mismatch` is available when you intentionally want to apply matching round IDs across pack versions.
-
-To make the curated pack the one the browser loads, copy or rename it to `data/rounds.json` after validation.
+By default only explicit rejects are removed. Add `--only-kept` for a strict hand-picked pack. Dataset-signature mismatches fail unless intentionally overridden.
 
 ## Cache review images locally
 
-For controlled/private deployments, or any deployment where you have the appropriate rights to host the review media, `scripts/cache_images.py` can replace remote review-image URLs with local content-addressed files.
-
-Standard-library mode caches images, removes failed downloads, and removes exact byte duplicates:
+For deployments where you have the appropriate rights to host the media:
 
 ```bash
 python scripts/cache_images.py data/rounds.curated.json \
@@ -192,124 +196,50 @@ python scripts/cache_images.py data/rounds.curated.json \
   --public-prefix assets/review-cache
 ```
 
-The downloader writes each completed image directly to disk rather than keeping the full image corpus in RAM. Cached filenames are derived from SHA-256 content hashes. The output round also records the original URL and SHA-256 digest.
+This downloads images to SHA-256 content-addressed filenames and removes failed or exact-duplicate images by default.
 
-To enable visual near-duplicate detection, install the optional Pillow dependency:
+For perceptual near-duplicate detection:
 
 ```bash
 python -m pip install -r requirements-images.txt
-```
-
-Then use a dHash Hamming-distance threshold. `4` is a conservative starting point:
-
-```bash
 python scripts/cache_images.py data/rounds.curated.json \
   --output data/rounds.cached.json \
   --perceptual-threshold 4
 ```
 
-Useful cache options:
+The perceptual mode uses a 64-bit dHash and Hamming distance. `4` is a conservative starting point.
 
-```text
---keep-failed              keep rounds that could not be cached
---keep-exact-duplicates    retain multiple rounds backed by identical bytes
---workers 12               concurrent image fetches
---max-mb 20                per-image download limit
---web-root .               root for resolving existing local image paths
-```
+## Real-data GitHub Actions test
 
-`assets/review-cache/` and generated `data/rounds*.json` are ignored by Git. That is deliberate: copying a third-party image into a local cache changes the deployment model, so publishing those files should be an explicit rights-aware decision.
+`.github/workflows/real-data-integration.yml` runs the complete networked path against an actual Amazon Reviews 2023 category:
 
-## Use already-downloaded raw files
+1. Verify current Hugging Face source files.
+2. Stream reviews and metadata.
+3. Build a real review-photo pack.
+4. Validate and score it.
+5. Generate an audit.
+6. Download/cache the selected review images.
+7. Run perceptual deduplication.
+8. Validate the cached pack.
+9. Upload the generated packs, reports, and cached images as an Actions artifact.
 
-```text
-data/raw/
-  Pet_Supplies.jsonl.gz
-  meta_Pet_Supplies.jsonl.gz
-  Automotive.jsonl.gz
-  meta_Automotive.jsonl.gz
-```
-
-```bash
-python scripts/build_pack.py \
-  --categories Pet_Supplies Automotive \
-  --raw-dir data/raw \
-  --limit 1000
-```
-
-`data/raw/` and generated `data/rounds*.json` are ignored by Git by default.
-
-## Build one category directly
-
-`scripts/build_dataset.py` accepts local paths or HTTP(S) URLs:
-
-```bash
-python scripts/build_dataset.py \
-  --reviews https://datarepo.eng.ucsd.edu/mcauley_group/data/amazon_2023/raw/review_categories/Pet_Supplies.jsonl.gz \
-  --metadata https://datarepo.eng.ucsd.edu/mcauley_group/data/amazon_2023/raw/meta_categories/meta_Pet_Supplies.jsonl.gz \
-  --source-category Pet_Supplies \
-  --output data/rounds.json \
-  --limit 1000
-```
-
-For fixture/debug work, `--max-review-records` and `--max-metadata-records` cap scans. Metadata caps can reduce successful joins and are not recommended for final packs.
+The workflow defaults to `All_Beauty` and 100 rounds because it is much smaller than the multi-gigabyte default game categories. Use **Run workflow** in GitHub Actions to choose another category or round count.
 
 ## Round generation
 
-1. Stream review records and reservoir-sample reviews containing customer images.
-2. Join sampled reviews to metadata with `parent_asin`.
+At a high level:
+
+1. Stream review records and reservoir-sample image-bearing reviews.
+2. Join reviews to product metadata with `parent_asin`.
 3. Keep a bounded metadata reservoir for distractors.
-4. Normalize known image representations and numeric/string prices.
-5. Use hierarchical categories to rank plausible wrong answers.
-6. Reject near-duplicate listing titles that make answers ambiguous.
+4. Normalize known image representations, categories, and prices.
+5. Generate initial taxonomy/title-based distractors.
+6. Reject near-duplicate listing titles.
 7. Emit at most one round per parent product.
-8. Optionally verify selected review image URLs.
-9. Balance categories, deduplicate, shuffle, and trim the final pack.
-10. Optionally score, audit, curate, cache, and image-dedupe before deployment.
-
-## Validate a generated pack
-
-```bash
-python scripts/validate_dataset.py data/rounds.json
-```
-
-The validator checks required fields, exactly four unique choices, correct-answer presence, duplicate IDs/products, ratings, and image references.
-
-## Output shape
-
-```json
-{
-  "version": 2,
-  "name": "Amazon Review Mystery Pack",
-  "categories": ["Pet_Supplies", "Automotive"],
-  "rounds": [
-    {
-      "id": "...",
-      "source_category": "Pet_Supplies",
-      "review_image": "https://...",
-      "rating": 2,
-      "review_title": "Broke in two days",
-      "review_text": "...",
-      "product": {
-        "title": "Automatic Cat Water Fountain",
-        "category": "Pet Supplies",
-        "category_path": ["Cats", "Feeding & Watering Supplies", "Fountains"],
-        "leaf_category": "Fountains",
-        "price": 29.99,
-        "asin": "...",
-        "parent_asin": "...",
-        "source_url": "https://www.amazon.com/dp/..."
-      },
-      "choices": ["Automatic Cat Water Fountain", "...", "...", "..."],
-      "analysis": {
-        "difficulty_score": 42,
-        "curation_priority": 14,
-        "flags": ["review_may_reveal_product_title"]
-      }
-    }
-  ]
-}
-```
+8. Optionally verify selected review-image URLs.
+9. Balance categories and deduplicate products.
+10. Rerank the accumulated candidate-title bank for stronger final choices.
+11. Optionally score, audit, curate, cache, and image-dedupe the pack.
 
 ## Tests
 
@@ -323,19 +253,19 @@ python scripts/validate_dataset.py data/demo.json
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-CI runs only these lightweight checks and cancels superseded runs. Network image downloads and Pillow are intentionally not part of CI.
+Normal CI stays lightweight and network-free. The separate real-data workflow covers the expensive integration path.
 
 ## GitHub Pages
 
-The game has no build step. GitHub Pages can publish the repository root directly. The bundled demo works as-is. Generated real-data packs and cached review images are intentionally ignored by Git because they may be large and because publishing third-party review media should be a deliberate decision.
+The game has no build step and can be served as static files. The bundled demo works immediately. Generated real-data packs and cached review images are ignored by Git by default because they can be large and because publishing third-party review media should be an intentional decision.
 
 ## Content and rights note
 
-This project is not affiliated with or endorsed by Amazon. The bundled demo artwork is original to this repository. The Amazon Reviews 2023 dataset contains third-party review content and customer-posted image URLs. Research-dataset availability should not be treated as an automatic grant to republish every customer image in a public or commercial game. Review the dataset terms and applicable content rights before deploying or caching real review images publicly.
+This project is not affiliated with or endorsed by Amazon. The bundled demo artwork is original to this repository. Amazon Reviews 2023 contains third-party review text and customer-posted image URLs. Dataset availability should not be treated as an automatic grant to republish or permanently cache every customer image. Review the dataset terms and applicable rights before public deployment.
 
 ## Next technical milestones
 
 - Moderation helpers for unsafe or personally identifying review images
-- Static sharding for packs too large to ship as one JSON file
-- Optional tiny API/object-storage mode for large rotating pools
+- Static sharding for very large packs
+- Optional tiny API/object-storage mode for larger rotating pools
 - Better image-cache pruning/reporting across repeated cache runs
