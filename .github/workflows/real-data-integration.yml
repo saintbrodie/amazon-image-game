@@ -1,0 +1,94 @@
+name: Real data integration
+
+on:
+  workflow_dispatch:
+    inputs:
+      category:
+        description: Amazon Reviews 2023 category key
+        required: false
+        default: All_Beauty
+      limit:
+        description: Number of playable rounds to build
+        required: false
+        default: "100"
+
+concurrency:
+  group: real-data-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  real-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      CATEGORY: ${{ inputs.category || 'All_Beauty' }}
+      ROUND_LIMIT: ${{ inputs.limit || '100' }}
+      HF_RAW_BASE: https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show source file headers
+        run: |
+          set -euxo pipefail
+          curl -fsSIL --max-time 30 "${HF_RAW_BASE}/review_categories/${CATEGORY}.jsonl" | tail -n 20 || true
+          curl -fsSIL --max-time 30 "${HF_RAW_BASE}/meta_categories/meta_${CATEGORY}.jsonl" | tail -n 20 || true
+
+      - name: Build real review-photo pack
+        run: |
+          set -euxo pipefail
+          time python scripts/build_pack.py \
+            --categories "${CATEGORY}" \
+            --limit "${ROUND_LIMIT}" \
+            --output data/real-pack.json
+
+      - name: Validate and score pack
+        run: |
+          set -euxo pipefail
+          python scripts/validate_dataset.py data/real-pack.json
+          python scripts/score_dataset.py data/real-pack.json --output data/real-pack.scored.json
+          python scripts/validate_dataset.py data/real-pack.scored.json
+          python scripts/audit_dataset.py data/real-pack.scored.json --json --output data/audit.json
+          python scripts/audit_dataset.py data/real-pack.scored.json | tee data/audit.txt
+
+      - name: Exercise real image cache and perceptual dedupe
+        run: |
+          set -euxo pipefail
+          python -m pip install --disable-pip-version-check -r requirements-images.txt
+          python scripts/cache_images.py data/real-pack.scored.json \
+            --output data/real-pack.cached.json \
+            --asset-dir artifacts/review-cache \
+            --public-prefix assets/review-cache \
+            --perceptual-threshold 4 \
+            --workers 12
+          python scripts/validate_dataset.py data/real-pack.cached.json
+
+      - name: Write run summary
+        if: always()
+        run: |
+          {
+            echo "## Real Amazon data integration"
+            echo
+            echo "- Category: \`${CATEGORY}\`"
+            echo "- Requested rounds: \`${ROUND_LIMIT}\`"
+            if [ -f data/audit.txt ]; then
+              echo
+              echo '```text'
+              cat data/audit.txt
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload generated pack and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-data-${{ env.CATEGORY }}-${{ github.run_id }}
+          retention-days: 7
+          if-no-files-found: warn
+          path: |
+            data/real-pack.json
+            data/real-pack.scored.json
+            data/real-pack.cached.json
+            data/audit.json
+            data/audit.txt
+            artifacts/review-cache/

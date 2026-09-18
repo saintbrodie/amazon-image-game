@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from build_pack import build_pack, category_label  # noqa: E402
+from build_pack import META_BASE, REVIEW_BASE, build_pack, category_label, category_sources  # noqa: E402
 
 
 def write_gzip_jsonl(path: Path, rows: list[dict]) -> None:
@@ -63,6 +63,21 @@ class BuildPackTests(unittest.TestCase):
         self.assertEqual(category_label("Patio_Lawn_and_Garden"), "Patio Lawn & Garden")
         self.assertEqual(category_label("Pet_Supplies"), "Pet Supplies")
 
+    def test_remote_sources_use_current_hugging_face_raw_layout(self):
+        reviews, metadata = category_sources("All_Beauty", None)
+        self.assertEqual(reviews, f"{REVIEW_BASE}/All_Beauty.jsonl")
+        self.assertEqual(metadata, f"{META_BASE}/meta_All_Beauty.jsonl")
+        self.assertIn("huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw", reviews)
+
+    def test_local_sources_accept_plain_jsonl(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            review = base / "All_Beauty.jsonl"
+            metadata = base / "meta_All_Beauty.jsonl"
+            review.write_text("", encoding="utf-8")
+            metadata.write_text("", encoding="utf-8")
+            self.assertEqual(category_sources("All_Beauty", base), (str(review), str(metadata)))
+
     def test_builds_balanced_multi_category_pack_from_local_files(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -88,6 +103,7 @@ class BuildPackTests(unittest.TestCase):
                 {"Pet_Supplies", "Automotive"},
             )
             self.assertEqual(result["stats"]["rounds_written"], 2)
+            self.assertEqual(result["stats"]["choice_reranking"]["rounds_fallback"], 0)
 
     def test_continue_on_error_keeps_successful_category(self):
         with tempfile.TemporaryDirectory() as tmp:

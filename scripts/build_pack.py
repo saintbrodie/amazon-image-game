@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Build one game pack from multiple Amazon Reviews 2023 categories.
 
-By default this streams the official UCSD .jsonl.gz files directly over HTTP,
-so it does not require keeping multi-gigabyte raw datasets on disk. Pass
---raw-dir to use already-downloaded category files instead.
+By default this streams the official McAuley Lab files from the Hugging Face
+dataset repository, so it does not require keeping the raw datasets on disk.
+Pass --raw-dir to use already-downloaded category files instead.
 """
 
 from __future__ import annotations
@@ -20,9 +20,11 @@ from pathlib import Path
 from typing import Any
 
 from build_dataset import build_game_data
+from pack_choices import candidate_banks, rerank_pack_choices
 
-REVIEW_BASE = "https://datarepo.eng.ucsd.edu/mcauley_group/data/amazon_2023/raw/review_categories"
-META_BASE = "https://datarepo.eng.ucsd.edu/mcauley_group/data/amazon_2023/raw/meta_categories"
+HF_RAW_BASE = "https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/resolve/main/raw"
+REVIEW_BASE = f"{HF_RAW_BASE}/review_categories"
+META_BASE = f"{HF_RAW_BASE}/meta_categories"
 DEFAULT_CATEGORIES = [
     "Pet_Supplies",
     "Patio_Lawn_and_Garden",
@@ -36,18 +38,23 @@ def category_label(category: str) -> str:
     return category.replace("_and_", " & ").replace("_", " ")
 
 
+def _find_local_source(raw_dir: Path, stem: str) -> Path:
+    candidates = [raw_dir / f"{stem}.jsonl.gz", raw_dir / f"{stem}.jsonl"]
+    for path in candidates:
+        if path.is_file():
+            return path
+    raise FileNotFoundError("Missing local dataset file; tried: " + ", ".join(str(path) for path in candidates))
+
+
 def category_sources(category: str, raw_dir: Path | None) -> tuple[str, str]:
     if raw_dir is None:
         return (
-            f"{REVIEW_BASE}/{category}.jsonl.gz",
-            f"{META_BASE}/meta_{category}.jsonl.gz",
+            f"{REVIEW_BASE}/{category}.jsonl",
+            f"{META_BASE}/meta_{category}.jsonl",
         )
 
-    review = raw_dir / f"{category}.jsonl.gz"
-    metadata = raw_dir / f"meta_{category}.jsonl.gz"
-    missing = [str(path) for path in (review, metadata) if not path.is_file()]
-    if missing:
-        raise FileNotFoundError("Missing local dataset file(s): " + ", ".join(missing))
+    review = _find_local_source(raw_dir, category)
+    metadata = _find_local_source(raw_dir, f"meta_{category}")
     return str(review), str(metadata)
 
 
@@ -96,6 +103,22 @@ def filter_live_images(
     return filtered, len(rounds) - len(filtered)
 
 
+def _merge_choice_bank(
+    destination: dict[str, list[str]],
+    seen: dict[str, set[str]],
+    rounds: list[dict[str, Any]],
+) -> None:
+    for category, titles in candidate_banks(rounds).items():
+        target = destination.setdefault(category, [])
+        target_seen = seen.setdefault(category, set())
+        for title in titles:
+            key = title.casefold()
+            if key in target_seen:
+                continue
+            target_seen.add(key)
+            target.append(title)
+
+
 def build_pack(
     categories: list[str],
     *,
@@ -106,6 +129,8 @@ def build_pack(
     image_workers: int,
     image_timeout: float,
     continue_on_error: bool,
+    max_review_records: int | None = None,
+    max_metadata_records: int | None = None,
 ) -> dict[str, Any]:
     if limit < 1:
         raise ValueError("limit must be at least 1")
@@ -120,6 +145,8 @@ def build_pack(
     combined: list[dict[str, Any]] = []
     category_stats: dict[str, Any] = {}
     failures: dict[str, str] = {}
+    choice_banks: dict[str, list[str]] = {}
+    choice_bank_seen: dict[str, set[str]] = {}
 
     for index, category in enumerate(categories):
         label = category_label(category)
@@ -133,8 +160,15 @@ def build_pack(
                 seed=seed + index * 1009,
                 name=label,
                 source_category=category,
+                max_review_records=max_review_records,
+                max_metadata_records=max_metadata_records,
             )
             rounds = payload["rounds"]
+            # Preserve the larger pre-trim bank of plausible metadata-reservoir
+            # candidates so final choice reranking has more than the selected
+            # products themselves to work with.
+            _merge_choice_bank(choice_banks, choice_bank_seen, rounds)
+
             dead = 0
             if check_images:
                 print(f"Checking {len(rounds):,} review image URLs…", flush=True)
@@ -150,6 +184,7 @@ def build_pack(
                 **payload["stats"],
                 "dead_images_removed": dead,
                 "rounds_kept": len(rounds),
+                "choice_bank_titles": len(choice_banks.get(category, [])),
             }
             print(f"Kept {len(rounds):,} {label} rounds.", flush=True)
         except Exception as exc:
@@ -174,6 +209,7 @@ def build_pack(
 
     rng.shuffle(unique)
     unique = unique[:limit]
+    choice_stats = rerank_pack_choices(unique, seed=seed, banks=choice_banks)
     successful_categories = [category for category in categories if category in category_stats]
 
     return {
@@ -187,6 +223,9 @@ def build_pack(
             "rounds_written": len(unique),
             "requested_rounds": limit,
             "image_health_check": check_images,
+            "max_review_records": max_review_records,
+            "max_metadata_records": max_metadata_records,
+            "choice_reranking": choice_stats,
             "category_stats": category_stats,
             "failures": failures,
         },
@@ -208,7 +247,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--raw-dir",
         type=Path,
-        help="Use local CATEGORY.jsonl.gz and meta_CATEGORY.jsonl.gz files instead of streaming UCSD",
+        help="Use local CATEGORY.jsonl(.gz) and meta_CATEGORY.jsonl(.gz) files instead of streaming Hugging Face",
     )
     parser.add_argument(
         "--check-images",
@@ -218,6 +257,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--image-workers", type=int, default=16)
     parser.add_argument("--image-timeout", type=float, default=10.0)
+    parser.add_argument("--max-review-records", type=int, help="Optional development cap on review rows scanned per category")
+    parser.add_argument("--max-metadata-records", type=int, help="Optional development cap on metadata rows scanned per category")
     parser.add_argument(
         "--continue-on-error",
         action="store_true",
@@ -237,6 +278,8 @@ def main() -> None:
         image_workers=args.image_workers,
         image_timeout=args.image_timeout,
         continue_on_error=args.continue_on_error,
+        max_review_records=args.max_review_records,
+        max_metadata_records=args.max_metadata_records,
     )
     if not payload["rounds"]:
         raise SystemExit("No playable rounds were produced.")
