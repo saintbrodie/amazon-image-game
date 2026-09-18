@@ -6,6 +6,7 @@
   <meta name="description" content="Guess the product from a mysterious customer review photo.">
   <title>What Did They Buy?</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="controls.css">
 </head>
 <body>
   <div class="page-shell">
@@ -22,9 +23,29 @@
 
     <main>
       <section class="game-toolbar" aria-label="Game controls">
-        <div class="mode-switch" role="group" aria-label="Clue mode">
-          <button class="mode-button is-active" type="button" data-mode="photo">Photo only</button>
-          <button class="mode-button" type="button" data-mode="review">Photo + review</button>
+        <div class="toolbar-controls">
+          <div class="mode-switch" role="group" aria-label="Clue mode">
+            <button class="mode-button is-active" type="button" data-mode="photo">Photo only</button>
+            <button class="mode-button" type="button" data-mode="review">Photo + review</button>
+          </div>
+
+          <label class="select-control">
+            <span>Category</span>
+            <select id="categorySelect" aria-label="Product category">
+              <option value="all">All categories</option>
+            </select>
+          </label>
+
+          <label class="select-control">
+            <span>Rounds</span>
+            <select id="roundCountSelect" aria-label="Number of rounds">
+              <option value="5">5</option>
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+              <option value="all">All</option>
+            </select>
+          </label>
         </div>
         <button class="secondary-button" id="newGameButton" type="button">New game</button>
       </section>
@@ -44,10 +65,11 @@
               <img id="reviewImage" alt="Customer review photo">
               <div class="photo-fallback" id="photoFallback" hidden>
                 <strong>Photo unavailable</strong>
-                <span>This round can still be answered from the choices.</span>
+                <span>This image disappeared from its source.</span>
+                <button class="secondary-button fallback-skip" id="skipBrokenButton" type="button">Skip this round</button>
               </div>
             </div>
-            <p class="photo-caption">Customer review photo</p>
+            <p class="photo-caption" id="photoCaption">Customer review photo</p>
 
             <article class="review-clue" id="reviewClue" hidden>
               <div class="stars" id="clueStars" aria-label="Review rating"></div>
@@ -97,7 +119,7 @@
     <button class="dialog-close" id="closeAboutButton" type="button" aria-label="Close">×</button>
     <p class="eyebrow">About the game</p>
     <h2>What Did They Buy?</h2>
-    <p>Guess products from customer review photos. The bundled demo uses original mock images. A local dataset builder can turn image-bearing Amazon Reviews 2023 records into game rounds without live-scraping Amazon.</p>
+    <p>Guess products from customer review photos. The bundled demo uses original mock images. The data tools can turn image-bearing Amazon Reviews 2023 records into game rounds without live-scraping Amazon.</p>
     <p>This project is not affiliated with or endorsed by Amazon. Review images and metadata from third-party datasets may have separate rights and usage restrictions. Check those terms before publishing a dataset-backed deployment.</p>
   </dialog>
 

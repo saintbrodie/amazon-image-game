@@ -1,0 +1,87 @@
+.toolbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.select-control {
+  display: inline-grid;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.select-control select {
+  min-width: 132px;
+  height: 38px;
+  padding: 0 34px 0 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 750;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.select-control select:focus-visible {
+  outline: 3px solid rgba(242, 140, 40, 0.4);
+  outline-offset: 2px;
+}
+
+.fallback-skip {
+  display: inline-block;
+  margin-top: 18px;
+  color: var(--ink);
+}
+
+.photo-caption {
+  min-height: 1.3em;
+}
+
+@media (max-width: 820px) {
+  .game-toolbar {
+    flex-direction: column;
+  }
+
+  .toolbar-controls {
+    width: 100%;
+    align-items: end;
+  }
+
+  .mode-switch {
+    min-height: 42px;
+  }
+
+  .select-control {
+    flex: 1 1 130px;
+  }
+
+  .select-control select {
+    width: 100%;
+  }
+
+  #newGameButton {
+    width: 100%;
+  }
+}
+
+@media (max-width: 520px) {
+  .toolbar-controls {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .mode-switch {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+}
