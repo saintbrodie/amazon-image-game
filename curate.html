@@ -6,6 +6,7 @@
   <meta name="description" content="Review and curate rounds for What Did They Buy?">
   <title>Round Curator | What Did They Buy?</title>
   <link rel="stylesheet" href="curate.css">
+  <link rel="stylesheet" href="curate-quality.css">
 </head>
 <body>
   <div class="shell">
@@ -43,6 +44,15 @@
           <option value="reject">Rejected</option>
         </select>
       </label>
+      <label>
+        <span>Sort</span>
+        <select id="sortSelect">
+          <option value="priority" selected>Needs review first</option>
+          <option value="hardest">Hardest first</option>
+          <option value="easiest">Easiest first</option>
+          <option value="dataset">Dataset order</option>
+        </select>
+      </label>
       <button id="previousButton" class="button secondary" type="button">Previous</button>
       <button id="nextButton" class="button secondary" type="button">Next</button>
       <button id="resetButton" class="button danger-quiet" type="button">Reset decisions</button>
@@ -67,6 +77,18 @@
           <p class="eyebrow" id="sourceCategory"></p>
           <h2 id="productTitle"></h2>
           <p class="productMeta" id="productMeta"></p>
+
+          <div class="quality-box" id="qualityBox">
+            <div>
+              <span>Curation priority</span>
+              <strong id="priorityScore">Not scored</strong>
+            </div>
+            <div>
+              <span>Difficulty</span>
+              <strong id="difficultyScore">Not scored</strong>
+            </div>
+            <ul id="qualityFlags"></ul>
+          </div>
 
           <div class="review-box">
             <div class="stars" id="reviewStars"></div>

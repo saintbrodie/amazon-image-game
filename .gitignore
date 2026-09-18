@@ -1,5 +1,6 @@
-# Generated game data and raw source datasets
+# Generated game data, audit output, and raw source datasets
 data/rounds*.json
+data/audit*.json
 data/raw/
 
 # Exported local curator decisions
