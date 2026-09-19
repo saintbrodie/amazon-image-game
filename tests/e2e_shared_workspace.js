@@ -42,7 +42,11 @@ async function resolveVisibleConflict(page, selector) {
   await page.waitForSelector("#sharedConflictBox:not([hidden])", { timeout: 15000 });
   page.once("dialog", (dialog) => dialog.accept());
   await page.click(selector);
-  await page.waitForSelector("#sharedConflictBox[hidden]", { timeout: 15000 });
+  await page.waitForFunction(
+    () => document.querySelector("#sharedConflictBox")?.hidden === true,
+    null,
+    { timeout: 15000 },
+  );
 }
 
 (async function run() {
