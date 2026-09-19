@@ -64,6 +64,45 @@ class ShardDatasetTests(unittest.TestCase):
         self.assertTrue(all(row["shard"] in shard_ids for row in manifest["index"]))
         self.assertEqual(manifest["categories"], {"Automotive": 3, "Beauty": 4})
 
+    def test_manifest_index_includes_only_compact_curator_summaries(self):
+        enriched = make_round(20, "Beauty")
+        enriched["review_text"] = "This full review must stay in the shard, not the manifest."
+        enriched["analysis"] = {
+            "curation_priority": 33,
+            "difficulty_score": 47,
+            "flags": ["large_detail_not_needed_in_index"],
+            "choice_similarity_max": 0.5,
+        }
+        enriched["screening"] = {
+            "risk_score": 20,
+            "needs_review": True,
+            "high_risk": False,
+            "severity_counts": {"low": 0, "medium": 1, "high": 0},
+            "flags": [
+                {"name": "person_face_detected", "severity": "medium", "source": "image"},
+            ],
+            "image": {"face_count": 1, "width": 1200, "height": 900},
+        }
+        manifest, shards = shard_dataset({**self.payload, "rounds": [enriched]}, shard_size=1)
+        entry = manifest["index"][0]
+        self.assertEqual(entry["analysis"], {"curation_priority": 33, "difficulty_score": 47})
+        self.assertEqual(
+            entry["screening"],
+            {
+                "risk_score": 20,
+                "needs_review": True,
+                "high_risk": False,
+                "severity_counts": {"low": 0, "medium": 1, "high": 0},
+            },
+        )
+        self.assertNotIn("review_text", entry)
+        self.assertNotIn("product", entry)
+        self.assertNotIn("choices", entry)
+        self.assertNotIn("flags", entry["analysis"])
+        self.assertNotIn("flags", entry["screening"])
+        self.assertIn("review_text", shards[0][1]["rounds"][0])
+        self.assertIn("flags", shards[0][1]["rounds"][0]["screening"])
+
     def test_sharding_is_deterministic_across_input_order(self):
         forward, _ = shard_dataset(self.payload, shard_size=3)
         reversed_payload = {**self.payload, "rounds": list(reversed(self.payload["rounds"]))}

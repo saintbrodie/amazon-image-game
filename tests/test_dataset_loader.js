@@ -57,7 +57,20 @@ function round(id, category = "Beauty") {
         { id: "0002", path: "shards/rounds-0002.json" },
       ],
       index: [
-        { id: "r1", category: "Beauty", shard: "0001" },
+        {
+          id: "r1",
+          category: "Beauty",
+          shard: "0001",
+          analysis: { curation_priority: 33, difficulty_score: 47, ignored: 999 },
+          screening: {
+            risk_score: 20,
+            needs_review: true,
+            high_risk: false,
+            severity_counts: { medium: 1 },
+            flags: [{ name: "should-not-survive" }],
+          },
+          ignored: "drop me",
+        },
         { id: "r2", category: "Automotive", shard: "0002" },
         { id: "r3", category: "Beauty", shard: "0001" },
       ],
@@ -86,6 +99,18 @@ function round(id, category = "Beauty") {
     assert.strictEqual(loader.roundCount, 3);
     assert.strictEqual(loader.signature, "sig123");
     assert.deepStrictEqual(loader.categories(), ["Automotive", "Beauty"]);
+    assert.deepStrictEqual(loader.index[0], {
+      id: "r1",
+      category: "Beauty",
+      shard: "0001",
+      analysis: { curation_priority: 33, difficulty_score: 47 },
+      screening: {
+        risk_score: 20,
+        needs_review: true,
+        high_risk: false,
+        severity_counts: { medium: 1 },
+      },
+    });
 
     const selected = [loader.index[2], loader.index[0], loader.index[1]];
     const loaded = await loader.loadEntries(selected);
@@ -99,7 +124,16 @@ function round(id, category = "Beauty") {
 
   {
     const calls = [];
-    const demo = { version: 1, name: "Demo", rounds: [round("demo-1")] };
+    const inlineRound = round("demo-1");
+    inlineRound.analysis = { curation_priority: 7, difficulty_score: 12, flags: ["ignored"] };
+    inlineRound.screening = {
+      risk_score: 50,
+      needs_review: true,
+      high_risk: true,
+      severity_counts: { high: 1 },
+      flags: [{ name: "contact_email", severity: "high" }],
+    };
+    const demo = { version: 1, name: "Demo", rounds: [inlineRound] };
     const routes = {
       "data/rounds.manifest.json": { payload: null, status: 404 },
       "data/rounds.json": { payload: null, status: 404 },
@@ -108,6 +142,13 @@ function round(id, category = "Beauty") {
     const loader = await DatasetLoader.open({ fetchFn: fakeFetch(routes, calls) });
     assert.strictEqual(loader.type, "inline");
     assert.strictEqual(loader.source, "data/demo.json");
+    assert.deepStrictEqual(loader.index[0].analysis, { curation_priority: 7, difficulty_score: 12 });
+    assert.deepStrictEqual(loader.index[0].screening, {
+      risk_score: 50,
+      needs_review: true,
+      high_risk: true,
+      severity_counts: { high: 1 },
+    });
     assert.deepStrictEqual((await loader.loadEntries(loader.index)).map((item) => item.id), ["demo-1"]);
   }
 

@@ -9,6 +9,7 @@
 
   function roundCategory(round) {
     return cleanText(round?.source_category)
+      || cleanText(round?.category)
       || cleanText(round?.product?.category)
       || "Other";
   }
@@ -68,6 +69,51 @@
       .sort((left, right) => left.localeCompare(right));
   }
 
+  function finiteNumber(value) {
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  }
+
+  function compactAnalysis(value) {
+    if (!value || typeof value !== "object") return null;
+    const result = {};
+    const priority = finiteNumber(value.curation_priority);
+    const difficulty = finiteNumber(value.difficulty_score);
+    if (priority !== null) result.curation_priority = priority;
+    if (difficulty !== null) result.difficulty_score = difficulty;
+    return Object.keys(result).length ? result : null;
+  }
+
+  function compactScreening(value) {
+    if (!value || typeof value !== "object") return null;
+    const result = {};
+    const risk = finiteNumber(value.risk_score);
+    if (risk !== null) result.risk_score = risk;
+    if (typeof value.needs_review === "boolean") result.needs_review = value.needs_review;
+    if (typeof value.high_risk === "boolean") result.high_risk = value.high_risk;
+    if (value.severity_counts && typeof value.severity_counts === "object") {
+      const counts = {};
+      ["low", "medium", "high"].forEach((severity) => {
+        const count = value.severity_counts[severity];
+        if (Number.isInteger(count) && count >= 0) counts[severity] = count;
+      });
+      if (Object.keys(counts).length) result.severity_counts = counts;
+    }
+    return Object.keys(result).length ? result : null;
+  }
+
+  function indexEntry(row, shard = null) {
+    const entry = {
+      id: String(row.id),
+      category: roundCategory(row),
+      shard,
+    };
+    const analysis = compactAnalysis(row.analysis);
+    const screening = compactScreening(row.screening);
+    if (analysis) entry.analysis = analysis;
+    if (screening) entry.screening = screening;
+    return entry;
+  }
+
   async function fetchJson(fetchFn, source) {
     const response = await fetchFn(source, { cache: "no-store" });
     if (!response || !response.ok) {
@@ -86,11 +132,7 @@
       this.payload = normalizeInlinePayload(payload);
       this.metadata = this.payload;
       this.roundMap = new Map(this.payload.rounds.map((round) => [String(round.id), round]));
-      this.index = this.payload.rounds.map((round) => ({
-        id: String(round.id),
-        category: roundCategory(round),
-        shard: null,
-      }));
+      this.index = this.payload.rounds.map((round) => indexEntry(round, null));
       this.roundCount = this.index.length;
       this.signature = null;
     }
@@ -116,11 +158,7 @@
       this.manifest = manifest;
       this.metadata = manifest;
       this.fetchFn = fetchFn;
-      this.index = manifest.index.map((row) => ({
-        id: String(row.id),
-        category: cleanText(row.category, "Other"),
-        shard: String(row.shard),
-      }));
+      this.index = manifest.index.map((row) => indexEntry(row, String(row.shard)));
       this.roundCount = Number(manifest.round_count) || this.index.length;
       this.signature = String(manifest.dataset_signature);
       this.shards = new Map(manifest.shards.map((row) => [String(row.id), row]));
@@ -205,6 +243,9 @@
   return {
     InlineDataSource,
     ShardedDataSource,
+    compactAnalysis,
+    compactScreening,
+    indexEntry,
     manifestLooksValid,
     normalizeInlinePayload,
     open,
