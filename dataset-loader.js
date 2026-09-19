@@ -83,6 +83,28 @@
     return Object.keys(result).length ? result : null;
   }
 
+  function compactScreeningFlags(value) {
+    if (!Array.isArray(value)) return [];
+    const seen = new Set();
+    const flags = [];
+    value.forEach((flag) => {
+      if (!flag || typeof flag !== "object") return;
+      const name = cleanText(flag.name);
+      if (!name) return;
+      const severity = ["low", "medium", "high"].includes(flag.severity) ? flag.severity : null;
+      const key = `${name}\u0000${severity || ""}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      const item = { name };
+      if (severity) item.severity = severity;
+      flags.push(item);
+    });
+    return flags.sort((left, right) => {
+      const nameOrder = left.name.localeCompare(right.name);
+      return nameOrder || String(left.severity || "").localeCompare(String(right.severity || ""));
+    });
+  }
+
   function compactScreening(value) {
     if (!value || typeof value !== "object") return null;
     const result = {};
@@ -98,6 +120,8 @@
       });
       if (Object.keys(counts).length) result.severity_counts = counts;
     }
+    const flags = compactScreeningFlags(value.flags);
+    if (flags.length) result.flags = flags;
     return Object.keys(result).length ? result : null;
   }
 
@@ -245,6 +269,7 @@
     ShardedDataSource,
     compactAnalysis,
     compactScreening,
+    compactScreeningFlags,
     indexEntry,
     manifestLooksValid,
     normalizeInlinePayload,
