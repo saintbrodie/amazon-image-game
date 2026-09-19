@@ -33,6 +33,41 @@ on:
         required: true
         default: true
         type: boolean
+      use_safety_model:
+        description: "Run the optional transformer image safety classifier"
+        required: true
+        default: false
+        type: boolean
+      safety_model:
+        description: "Hugging Face image-classification model ID"
+        required: true
+        default: "Falconsai/nsfw_image_detection"
+        type: string
+      safety_model_revision:
+        description: "Optional Hugging Face model revision/commit"
+        required: false
+        default: ""
+        type: string
+      safety_positive_labels:
+        description: "Space-separated classifier labels treated as review-worthy"
+        required: true
+        default: "nsfw"
+        type: string
+      safety_review_threshold:
+        description: "Model score that produces a medium human-review flag"
+        required: true
+        default: "0.60"
+        type: string
+      safety_high_threshold:
+        description: "Model score that produces a high-severity flag"
+        required: true
+        default: "0.95"
+        type: string
+      safety_device:
+        description: "Transformers device: auto, cpu, GPU index, or backend string"
+        required: true
+        default: "auto"
+        type: string
       exclude_high:
         description: "Exclude high-confidence privacy/problem flags"
         required: true
@@ -52,8 +87,10 @@ on:
     paths:
       - ".github/workflows/build-deployment.yml"
       - "requirements-screening.txt"
+      - "requirements-screening-model.txt"
       - "scripts/apply_curation.py"
       - "scripts/cache_images.py"
+      - "scripts/image_safety.py"
       - "scripts/screen_dataset.py"
       - "scripts/shard_dataset.py"
       - "scripts/validate_shards.py"
@@ -83,6 +120,13 @@ jobs:
       INSPECT_IMAGES: ${{ github.event_name == 'pull_request' && 'true' || inputs.inspect_images }}
       DETECT_FACES: ${{ github.event_name == 'pull_request' && 'true' || inputs.detect_faces }}
       DETECT_QR: ${{ github.event_name == 'pull_request' && 'true' || inputs.detect_qr }}
+      USE_SAFETY_MODEL: ${{ github.event_name == 'pull_request' && 'false' || inputs.use_safety_model }}
+      SAFETY_MODEL: ${{ github.event_name == 'pull_request' && 'Falconsai/nsfw_image_detection' || inputs.safety_model }}
+      SAFETY_MODEL_REVISION: ${{ github.event_name == 'pull_request' && '' || inputs.safety_model_revision }}
+      SAFETY_POSITIVE_LABELS: ${{ github.event_name == 'pull_request' && 'nsfw' || inputs.safety_positive_labels }}
+      SAFETY_REVIEW_THRESHOLD: ${{ github.event_name == 'pull_request' && '0.60' || inputs.safety_review_threshold }}
+      SAFETY_HIGH_THRESHOLD: ${{ github.event_name == 'pull_request' && '0.95' || inputs.safety_high_threshold }}
+      SAFETY_DEVICE: ${{ github.event_name == 'pull_request' && 'auto' || inputs.safety_device }}
       EXCLUDE_HIGH: ${{ github.event_name == 'pull_request' && 'false' || inputs.exclude_high }}
       CURATION_JSON: ${{ github.event_name == 'pull_request' && '' || inputs.curation_json }}
       ONLY_KEPT: ${{ github.event_name == 'pull_request' && 'false' || inputs.only_kept }}
@@ -95,6 +139,10 @@ jobs:
 
       - name: Install image screening dependencies
         run: python -m pip install --disable-pip-version-check -r requirements-screening.txt
+
+      - name: Install optional model screening dependencies
+        if: env.USE_SAFETY_MODEL == 'true'
+        run: python -m pip install --disable-pip-version-check -r requirements-screening-model.txt
 
       - name: Prepare source pack
         shell: bash
@@ -174,6 +222,29 @@ jobs:
             args+=(--inspect-images)
             if [[ "$DETECT_FACES" == "true" ]]; then args+=(--detect-faces); fi
             if [[ "$DETECT_QR" == "true" ]]; then args+=(--detect-qr); fi
+          fi
+          if [[ "$USE_SAFETY_MODEL" == "true" ]]; then
+            if [[ "$INSPECT_IMAGES" != "true" ]]; then
+              echo "use_safety_model requires inspect_images" >&2
+              exit 1
+            fi
+            args+=(
+              --safety-model "$SAFETY_MODEL"
+              --safety-review-threshold "$SAFETY_REVIEW_THRESHOLD"
+              --safety-high-threshold "$SAFETY_HIGH_THRESHOLD"
+            )
+            if [[ -n "$SAFETY_MODEL_REVISION" ]]; then
+              args+=(--safety-model-revision "$SAFETY_MODEL_REVISION")
+            fi
+            if [[ -n "$SAFETY_DEVICE" ]]; then
+              args+=(--safety-device "$SAFETY_DEVICE")
+            fi
+            if [[ -n "${SAFETY_POSITIVE_LABELS//[[:space:]]/}" ]]; then
+              read -r -a safety_labels <<< "$SAFETY_POSITIVE_LABELS"
+              for label in "${safety_labels[@]}"; do
+                args+=(--safety-positive-label "$label")
+              done
+            fi
           fi
           if [[ "$EXCLUDE_HIGH" == "true" ]]; then args+=(--exclude-high); fi
           python scripts/screen_dataset.py "${args[@]}"
@@ -323,6 +394,7 @@ jobs:
           assert manifest['round_count'] == 5, manifest['round_count']
           assert info['curation']['applied'] is True
           assert info['curation']['rejected_present'] == 1
+          assert info['screening']['safety_model'] is None
           PY
           fi
 
@@ -337,6 +409,11 @@ jobs:
             echo "- Categories: \`${CATEGORIES}\`"
             echo "- Requested limit: \`${ROUND_LIMIT}\`"
             echo "- Shard size: \`${SHARD_SIZE}\`"
+            echo "- Transformer safety model enabled: \`${USE_SAFETY_MODEL}\`"
+            if [[ "$USE_SAFETY_MODEL" == "true" ]]; then
+              echo "- Safety model: \`${SAFETY_MODEL}\`"
+              echo "- Safety review/high thresholds: \`${SAFETY_REVIEW_THRESHOLD}\` / \`${SAFETY_HIGH_THRESHOLD}\`"
+            fi
             if [[ -f reports/screening-report.json ]]; then
               echo
               echo "### Screening"
