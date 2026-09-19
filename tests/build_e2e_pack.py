@@ -25,6 +25,45 @@ def main() -> None:
         product = round_data.setdefault("product", {})
         product["parent_asin"] = f"E2EP{index:05d}"
         product["asin"] = f"E2EA{index:05d}"
+
+        # Curator-relevant metadata deliberately varies across the fixture so
+        # browser tests can filter/sort from the manifest without preloading shards.
+        round_data["analysis"] = {
+            "curation_priority": (index * 17) % 101,
+            "difficulty_score": (index * 29) % 101,
+            "flags": ["fixture_quality_flag"] if index % 4 == 0 else [],
+        }
+        if index % 10 == 0:
+            round_data["screening"] = {
+                "risk_score": 70,
+                "needs_review": True,
+                "high_risk": True,
+                "severity_counts": {"high": 1},
+                "flags": [
+                    {"name": "fixture_high_risk", "severity": "high", "source": "image"},
+                ],
+                "image": {"fixture": True},
+            }
+        elif index % 3 == 0:
+            round_data["screening"] = {
+                "risk_score": 20,
+                "needs_review": True,
+                "high_risk": False,
+                "severity_counts": {"medium": 1},
+                "flags": [
+                    {"name": "person_face_detected", "severity": "medium", "source": "image"},
+                ],
+                "image": {"fixture": True},
+            }
+        else:
+            round_data["screening"] = {
+                "risk_score": 0,
+                "needs_review": False,
+                "high_risk": False,
+                "severity_counts": {},
+                "flags": [],
+                "image": {"fixture": True},
+            }
         rounds.append(round_data)
 
     output = {
