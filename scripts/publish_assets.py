@@ -24,6 +24,7 @@ from urllib.parse import urlparse
 
 DEFAULT_ASSET_PREFIX = "assets/review-cache/"
 DEFAULT_CACHE_CONTROL = "public,max-age=31536000,immutable"
+REPORT_SAMPLE_LIMIT = 100
 
 
 @dataclass(frozen=True)
@@ -61,24 +62,25 @@ def normalize_public_base_url(value: str) -> str:
     return f"{raw.rstrip('/')}/"
 
 
-def safe_manifest_path(site_dir: Path, manifest: Path | None) -> Path:
+def contained_site_path(site_dir: Path, selected: Path, *, field: str) -> Path:
     root = site_dir.resolve()
-    candidate = (manifest if manifest is not None else site_dir / "data" / "rounds.manifest.json").resolve()
+    candidate = selected if selected.is_absolute() else root / selected
+    candidate = candidate.resolve()
     try:
         candidate.relative_to(root)
     except ValueError as exc:
-        raise ValueError("manifest path must remain inside site_dir") from exc
+        raise ValueError(f"{field} must remain inside site_dir") from exc
     return candidate
+
+
+def safe_manifest_path(site_dir: Path, manifest: Path | None) -> Path:
+    selected = manifest if manifest is not None else Path("data/rounds.manifest.json")
+    return contained_site_path(site_dir, selected, field="manifest path")
 
 
 def safe_asset_dir(site_dir: Path, asset_dir: Path | None) -> Path:
-    root = site_dir.resolve()
-    candidate = (asset_dir if asset_dir is not None else site_dir / "assets" / "review-cache").resolve()
-    try:
-        candidate.relative_to(root)
-    except ValueError as exc:
-        raise ValueError("asset_dir must remain inside site_dir") from exc
-    return candidate
+    selected = asset_dir if asset_dir is not None else Path("assets/review-cache")
+    return contained_site_path(site_dir, selected, field="asset_dir")
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
@@ -215,6 +217,7 @@ def report_payload(
     upload_result: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     total_bytes = sum(item.size for item in uploads)
+    sample = uploads[:REPORT_SAMPLE_LIMIT]
     result: dict[str, Any] = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "applied": applied,
@@ -224,15 +227,16 @@ def report_payload(
         "public_base_url": normalize_public_base_url(public_base_url),
         "planned_files": len(uploads),
         "planned_bytes": total_bytes,
-        "objects": [
+        "object_sample": [
             {
                 "relative_path": item.relative_path,
                 "object_key": item.object_key,
                 "size": item.size,
                 "content_type": item.content_type,
             }
-            for item in uploads
+            for item in sample
         ],
+        "object_sample_truncated": len(uploads) > len(sample),
     }
     if upload_result:
         result.update(upload_result)
@@ -256,8 +260,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--endpoint-url", help="Custom S3-compatible endpoint, e.g. Cloudflare R2 or MinIO")
     parser.add_argument("--region", help="Optional S3 region")
     parser.add_argument("--profile", help="Optional local AWS profile name")
-    parser.add_argument("--manifest", type=Path, help="Manifest path; defaults inside site_dir")
-    parser.add_argument("--asset-dir", type=Path, help="Cached review-image directory; defaults inside site_dir")
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="Manifest path relative to site_dir; defaults to data/rounds.manifest.json",
+    )
+    parser.add_argument(
+        "--asset-dir",
+        type=Path,
+        help="Review-image directory relative to site_dir; defaults to assets/review-cache",
+    )
     parser.add_argument("--asset-path-prefix", default=DEFAULT_ASSET_PREFIX)
     parser.add_argument("--cache-control", default=DEFAULT_CACHE_CONTROL)
     parser.add_argument("--report", type=Path, help="Optional JSON plan/result report")
@@ -274,6 +286,8 @@ def main() -> None:
     site_dir = args.site_dir.resolve()
     if not site_dir.is_dir():
         raise SystemExit(f"site directory does not exist: {site_dir}")
+    if not args.bucket.strip():
+        raise SystemExit("bucket is required")
 
     try:
         manifest_path = safe_manifest_path(site_dir, args.manifest)
