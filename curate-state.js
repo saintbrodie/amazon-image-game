@@ -68,7 +68,10 @@
     if (!value || typeof value !== "object") return null;
     const name = cleanText(value.name).slice(0, 60);
     if (!name) return null;
-    const threshold = Math.max(0, Math.min(100, Math.round(Number(value.maxPriority) || 20)));
+    const numericPriority = Number(value.maxPriority);
+    const threshold = Number.isFinite(numericPriority)
+      ? Math.max(0, Math.min(100, Math.round(numericPriority)))
+      : 20;
     return {
       name,
       category: cleanText(value.category) || "all",
