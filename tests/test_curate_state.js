@@ -55,6 +55,7 @@ const CuratorState = require("../curate-state.js");
     sort: "screening",
     maxPriority: 100,
   });
+  assert.strictEqual(CuratorState.normalizePreset({ name: "Zero", maxPriority: 0 }).maxPriority, 0);
 
   let presets = CuratorState.upsertPreset([], preset);
   presets = CuratorState.upsertPreset(presets, { ...preset, name: "faces", sort: "priority" });
