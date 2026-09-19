@@ -29,6 +29,8 @@ jobs:
           node --check app.js
           node --check curate-screening.js
           node --check curate-actions.js
+          node --check workspace-sync.js
+          node --check curate-shared.js
           node --check curate.js
       - name: Test browser game modules
         run: |
@@ -37,6 +39,7 @@ jobs:
           node tests/test_curate_screening.js
           node tests/test_curate_actions.js
           node tests/test_curate_state.js
+          node tests/test_workspace_sync.js
       - name: Check Python syntax
         run: python -m compileall -q scripts tests
       - name: Validate bundled game data
