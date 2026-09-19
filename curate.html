@@ -57,6 +57,10 @@
         </select>
       </label>
       <label>
+        <span>Signal queue</span>
+        <select id="signalSelect"><option value="all">All signals</option></select>
+      </label>
+      <label>
         <span>Sort</span>
         <select id="sortSelect">
           <option value="priority" selected>Needs review first</option>
@@ -70,6 +74,25 @@
       <button id="nextButton" class="button secondary" type="button">Next</button>
       <button id="resetButton" class="button danger-quiet" type="button">Reset decisions</button>
     </section>
+
+    <section class="bulk-toolbar" aria-label="Bulk curation actions">
+      <div class="bulk-copy">
+        <strong>Bulk actions</strong>
+        <span>Only undecided rounds are changed. Existing manual decisions are preserved.</span>
+      </div>
+      <label class="bulk-threshold">
+        <span>Auto-keep max priority</span>
+        <input id="bulkPriorityInput" type="number" min="0" max="100" step="1" value="20" inputmode="numeric">
+      </label>
+      <button id="keepClearButton" class="button secondary bulk-button" type="button">
+        Keep clear ≤20 <span id="keepClearCount" class="button-count">0</span>
+      </button>
+      <button id="rejectHighButton" class="button danger bulk-button" type="button">
+        Reject high-risk <span id="rejectHighCount" class="button-count">0</span>
+      </button>
+      <button id="undoBulkButton" class="button secondary" type="button" disabled>Undo bulk</button>
+    </section>
+    <p id="bulkStatus" class="bulk-status" aria-live="polite"></p>
 
     <main class="card" id="curationCard">
       <div class="loading" id="loadingState">Loading rounds…</div>
@@ -139,7 +162,7 @@
 
     <section class="empty-state" id="emptyState" hidden>
       <h2>Nothing matches this filter.</h2>
-      <p>Change the category/status/screening filter, or export your decisions if you are done.</p>
+      <p>Change the category/status/screening/signal filter, or export your decisions if you are done.</p>
     </section>
 
     <p class="dataset-note" id="datasetNote"></p>
@@ -148,6 +171,7 @@
   <script src="game-core.js"></script>
   <script src="dataset-loader.js"></script>
   <script src="curate-screening.js"></script>
+  <script src="curate-actions.js"></script>
   <script src="curate.js" defer></script>
 </body>
 </html>
