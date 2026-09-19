@@ -1,8 +1,11 @@
+const MANIFEST_SOURCE = "data/rounds.manifest.json";
 const DATA_SOURCES = ["data/rounds.json", "data/demo.json"];
 
 const state = {
   dataset: null,
+  loader: null,
   rounds: [],
+  renderToken: 0,
   originalOrder: new Map(),
   datasetSignature: "",
   decisions: {},
@@ -71,7 +74,7 @@ function humanizeFlag(value) {
 }
 
 function categoryKey(round) {
-  return cleanText(round.source_category) || cleanText(round.product?.category) || "Other";
+  return cleanText(round.source_category) || cleanText(round.category) || cleanText(round.product?.category) || "Other";
 }
 
 function starString(rating) {
@@ -106,24 +109,6 @@ function saveDecisions() {
     decisions: state.decisions,
     updated_at: new Date().toISOString(),
   }));
-}
-
-async function loadDataset() {
-  let lastError = null;
-  for (const source of DATA_SOURCES) {
-    try {
-      const response = await fetch(source, { cache: "no-store" });
-      if (!response.ok) throw new Error(`${source}: ${response.status}`);
-      const payload = await response.json();
-      if (!payload || !Array.isArray(payload.rounds) || !payload.rounds.length) {
-        throw new Error(`${source}: no rounds`);
-      }
-      return { payload, source };
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError || new Error("No dataset found.");
 }
 
 function populateCategories() {
@@ -290,40 +275,59 @@ function renderAnalysis(round) {
   }));
 }
 
-function render() {
+async function render() {
   renderStats();
-  const round = currentRound();
-  const hasRound = Boolean(round);
+  const entry = currentRound();
+  const hasRound = Boolean(entry);
   els.curationCard.hidden = !hasRound;
   els.emptyState.hidden = hasRound;
-  if (!round) return;
+  if (!entry) {
+    state.renderToken += 1;
+    return;
+  }
 
-  els.content.hidden = false;
-  els.loadingState.hidden = true;
-  els.positionLabel.textContent = `${state.index + 1} / ${state.filtered.length}`;
-  els.roundId.textContent = round.id;
-  els.sourceCategory.textContent = humanizeCategory(categoryKey(round));
-  els.productTitle.textContent = round.product.title;
-  els.productMeta.textContent = formatMeta(round.product);
-  els.reviewStars.textContent = starString(round.rating);
-  els.reviewTitle.textContent = cleanText(round.review_title, "Customer review");
-  els.reviewText.textContent = cleanText(round.review_text, "No review text.");
-  renderChoiceList(round);
-  renderDecision(round);
-  renderScreening(round);
-  renderAnalysis(round);
+  const renderToken = ++state.renderToken;
+  els.content.hidden = true;
+  els.loadingState.textContent = "Loading round…";
+  els.loadingState.hidden = false;
 
-  els.imageFallback.hidden = true;
-  els.reviewImage.hidden = false;
-  els.reviewImage.src = "";
-  els.reviewImage.src = round.review_image;
+  try {
+    const [round] = await state.loader.loadEntries([entry]);
+    if (renderToken !== state.renderToken) return;
 
-  if (round.product.source_url) {
-    els.sourceLink.href = round.product.source_url;
-    els.sourceLink.hidden = false;
-  } else {
-    els.sourceLink.hidden = true;
-    els.sourceLink.removeAttribute("href");
+    els.content.hidden = false;
+    els.loadingState.hidden = true;
+    els.positionLabel.textContent = `${state.index + 1} / ${state.filtered.length}`;
+    els.roundId.textContent = round.id;
+    els.sourceCategory.textContent = humanizeCategory(categoryKey(round));
+    els.productTitle.textContent = round.product.title;
+    els.productMeta.textContent = formatMeta(round.product);
+    els.reviewStars.textContent = starString(round.rating);
+    els.reviewTitle.textContent = cleanText(round.review_title, "Customer review");
+    els.reviewText.textContent = cleanText(round.review_text, "No review text.");
+    renderChoiceList(round);
+    renderDecision(round);
+    renderScreening(round);
+    renderAnalysis(round);
+
+    els.imageFallback.hidden = true;
+    els.reviewImage.hidden = false;
+    els.reviewImage.src = "";
+    els.reviewImage.src = round.review_image;
+
+    if (round.product.source_url) {
+      els.sourceLink.href = round.product.source_url;
+      els.sourceLink.hidden = false;
+    } else {
+      els.sourceLink.hidden = true;
+      els.sourceLink.removeAttribute("href");
+    }
+  } catch (error) {
+    if (renderToken !== state.renderToken) return;
+    els.content.hidden = true;
+    els.loadingState.hidden = false;
+    els.loadingState.textContent = `Could not load round: ${error.message}`;
+    console.error(error);
   }
 }
 
@@ -468,17 +472,22 @@ function bindEvents() {
 async function init() {
   bindEvents();
   try {
-    const { payload, source } = await loadDataset();
-    state.dataset = payload;
-    state.rounds = payload.rounds.filter((round) => round?.id && round?.product?.title && round?.review_image);
+    const loader = await DatasetLoader.open({
+      manifestSource: MANIFEST_SOURCE,
+      dataSources: DATA_SOURCES,
+    });
+    state.loader = loader;
+    state.dataset = loader.metadata;
+    state.rounds = loader.index;
     state.rounds.forEach((round, index) => state.originalOrder.set(round.id, index));
-    state.datasetSignature = datasetSignature(state.rounds);
+    state.datasetSignature = loader.signature || datasetSignature(state.rounds);
     state.decisions = loadStoredDecisions();
     populateCategories();
     const scored = state.rounds.filter((round) => round.analysis && typeof round.analysis === "object").length;
     const screened = state.rounds.filter((round) => CuratorScreening.screening(round)).length;
     const flagged = state.rounds.filter((round) => CuratorScreening.needsReview(round)).length;
-    els.datasetNote.textContent = `${payload.name || source} · ${state.rounds.length.toLocaleString()} rounds · ${scored.toLocaleString()} scored · ${screened.toLocaleString()} screened · ${flagged.toLocaleString()} flagged · signature ${state.datasetSignature}`;
+    const loadingMode = loader.type === "sharded" ? "lazy sharded" : "inline";
+    els.datasetNote.textContent = `${loader.metadata?.name || loader.source} · ${state.rounds.length.toLocaleString()} rounds · ${scored.toLocaleString()} scored · ${screened.toLocaleString()} screened · ${flagged.toLocaleString()} flagged · ${loadingMode} · signature ${state.datasetSignature}`;
     rebuildFilter();
   } catch (error) {
     els.loadingState.textContent = `Could not load rounds: ${error.message}`;
