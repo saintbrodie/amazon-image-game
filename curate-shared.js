@@ -29,6 +29,9 @@
 
   if (!els.connect || typeof WorkspaceSync === "undefined") return;
 
+  let applyingShared = false;
+  let originalSaveWorkspace = null;
+
   function configKey() {
     return "mystery-cart-shared-config";
   }
@@ -37,8 +40,70 @@
     return "mystery-cart-shared-token";
   }
 
-  function bridge() {
-    return window.CuratorWorkspaceBridge || null;
+  function curatorReady() {
+    return typeof state !== "undefined"
+      && typeof saveWorkspace === "function"
+      && typeof rebuildFilter === "function"
+      && Boolean(state.datasetSignature)
+      && Array.isArray(state.rounds)
+      && state.rounds.length > 0;
+  }
+
+  function validIds() {
+    return new Set(state.rounds.map((round) => String(round.id)));
+  }
+
+  function snapshot() {
+    const ids = validIds();
+    const decisions = {};
+    Object.entries(state.decisions || {}).forEach(([id, value]) => {
+      if (ids.has(id) && (value === "keep" || value === "reject")) decisions[id] = value;
+    });
+    return {
+      version: 2,
+      dataset_signature: state.datasetSignature,
+      decisions,
+      annotations: CuratorState.normalizeAnnotations(state.annotations, ids),
+      queue_presets: CuratorState.normalizePresets(state.presets),
+    };
+  }
+
+  function applySharedWorkspace(workspace) {
+    if (!workspace || workspace.dataset_signature !== state.datasetSignature) {
+      throw new Error("Shared workspace dataset signature does not match this curator dataset.");
+    }
+    const ids = validIds();
+    const decisions = {};
+    Object.entries(workspace.decisions || {}).forEach(([id, value]) => {
+      if (ids.has(id) && (value === "keep" || value === "reject")) decisions[id] = value;
+    });
+    state.decisions = decisions;
+    state.annotations = CuratorState.normalizeAnnotations(workspace.annotations, ids);
+    state.presets = CuratorState.normalizePresets(workspace.queue_presets || workspace.presets);
+    clearBulkUndo();
+
+    applyingShared = true;
+    try {
+      originalSaveWorkspace();
+    } finally {
+      applyingShared = false;
+    }
+    populateTags();
+    populatePresets();
+    rebuildFilter({ preserveRoundId: currentRound()?.id || null });
+  }
+
+  function installWorkspaceHook() {
+    originalSaveWorkspace = saveWorkspace;
+    saveWorkspace = function sharedAwareSaveWorkspace(...args) {
+      const result = originalSaveWorkspace(...args);
+      if (!applyingShared) {
+        document.dispatchEvent(new CustomEvent("curator:workspace-changed", {
+          detail: { source: "local" },
+        }));
+      }
+      return result;
+    };
   }
 
   function apiHash(apiBase) {
@@ -46,8 +111,7 @@
   }
 
   function metaKey(apiBase) {
-    const current = bridge();
-    return current ? `mystery-cart-shared-meta:${current.datasetSignature}:${apiHash(apiBase)}` : "";
+    return `mystery-cart-shared-meta:${state.datasetSignature}:${apiHash(apiBase)}`;
   }
 
   function normalizeObject(value) {
@@ -90,10 +154,8 @@
   }
 
   function loadMeta(apiBase) {
-    const key = metaKey(apiBase);
-    if (!key) return { revision: 0, fingerprint: "" };
     try {
-      const parsed = JSON.parse(localStorage.getItem(key) || "{}");
+      const parsed = JSON.parse(localStorage.getItem(metaKey(apiBase)) || "{}");
       return {
         revision: Math.max(0, Number(parsed.revision) || 0),
         fingerprint: typeof parsed.fingerprint === "string" ? parsed.fingerprint : "",
@@ -129,8 +191,7 @@
     els.token.disabled = shared.connected;
     els.conflictBox.hidden = !shared.conflict;
     if (shared.conflict) {
-      const count = shared.conflict.conflicts?.length || 0;
-      els.conflictCount.textContent = String(count);
+      els.conflictCount.textContent = String(shared.conflict.conflicts?.length || 0);
     }
   }
 
@@ -146,8 +207,7 @@
   async function refreshActivity() {
     if (!shared.client || !shared.connected) return;
     try {
-      const rows = await shared.client.history();
-      els.activity.textContent = formatActivity(rows);
+      els.activity.textContent = formatActivity(await shared.client.history());
     } catch (error) {
       els.activity.textContent = `Could not load activity: ${error.message}`;
     }
@@ -157,7 +217,7 @@
     shared.revision = Number(result.revision) || 0;
     shared.dirty = false;
     shared.conflict = null;
-    bridge().apply(workspace, { source: "shared" });
+    applySharedWorkspace(workspace);
     saveMeta(workspace);
     const actor = result.updated_by || "shared workspace";
     const changed = result.changed === false ? "up to date" : `synced as revision ${shared.revision}`;
@@ -169,14 +229,11 @@
 
   async function syncNow(strategy = "reject") {
     if (!shared.client || !shared.connected || shared.syncing) return;
-    const currentBridge = bridge();
-    if (!currentBridge) return;
     shared.syncing = true;
     renderControls();
     setStatus(`Syncing r${shared.revision}…`, "syncing");
     try {
-      const workspace = currentBridge.snapshot();
-      const result = await shared.client.sync(workspace, {
+      const result = await shared.client.sync(snapshot(), {
         baseRevision: shared.revision,
         strategy,
       });
@@ -206,8 +263,7 @@
     if (!shared.client || !shared.connected || shared.syncing || shared.conflict) return;
     try {
       const remote = await shared.client.get();
-      const remoteRevision = Number(remote.revision) || 0;
-      if (remoteRevision > shared.revision) await syncNow();
+      if ((Number(remote.revision) || 0) > shared.revision) await syncNow();
     } catch (error) {
       setStatus("Shared connection issue", "error");
       setMessage(error.message);
@@ -227,11 +283,6 @@
   }
 
   async function connect() {
-    const currentBridge = bridge();
-    if (!currentBridge) {
-      setMessage("Curator dataset is not ready yet.");
-      return;
-    }
     const actor = els.actor.value.trim();
     if (!actor) {
       els.actor.focus();
@@ -243,7 +294,7 @@
     let client;
     try {
       client = new WorkspaceSync.Client({
-        datasetSignature: currentBridge.datasetSignature,
+        datasetSignature: state.datasetSignature,
         apiBase: els.apiBase.value.trim() || "/api/workspaces",
         actor,
         token: els.token.value,
@@ -263,11 +314,12 @@
       shared.revision = meta.revision <= (Number(remote.revision) || 0) ? meta.revision : 0;
       shared.connected = true;
       shared.conflict = null;
-      const local = currentBridge.snapshot();
-      shared.dirty = !meta.fingerprint || fingerprint(local) !== meta.fingerprint || workspaceHasContent(local) && meta.revision === 0;
+      const local = snapshot();
+      shared.dirty = !meta.fingerprint
+        || fingerprint(local) !== meta.fingerprint
+        || (workspaceHasContent(local) && meta.revision === 0);
       setStatus(`Shared · server r${Number(remote.revision) || 0}`, "connected");
       setMessage(remote.exists ? "Connected. Merging local and shared workspace…" : "Connected. Creating the first shared revision…");
-      renderControls();
     } catch (error) {
       shared.client = null;
       shared.connected = false;
@@ -304,6 +356,7 @@
   }
 
   function initializeFields() {
+    installWorkspaceHook();
     const config = loadConfig();
     const params = new URLSearchParams(window.location.search);
     els.actor.value = params.get("actor") || config.actor || "";
@@ -325,8 +378,7 @@
     if (els.autoSync.checked && shared.dirty) scheduleSync();
   });
 
-  document.addEventListener("curator:workspace-changed", (event) => {
-    if (event.detail?.source === "shared") return;
+  document.addEventListener("curator:workspace-changed", () => {
     shared.dirty = true;
     if (shared.connected) {
       setStatus(`Shared · r${shared.revision} · local changes`, "dirty");
@@ -334,5 +386,13 @@
     }
   });
 
-  document.addEventListener("curator:ready", initializeFields, { once: true });
+  function waitForCurator() {
+    if (curatorReady()) {
+      initializeFields();
+      return;
+    }
+    setTimeout(waitForCurator, 50);
+  }
+
+  waitForCurator();
 })();
