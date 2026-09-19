@@ -28,6 +28,9 @@ class ScreenDatasetTests(unittest.TestCase):
         self.assertIn("contact_phone", names)
         self.assertTrue(all(flag["severity"] == "high" for flag in flags))
 
+        sentence_flags = text_flags(make_round("sentence", "Contact me at person@example.com."))
+        self.assertIn("contact_email", {flag["name"] for flag in sentence_flags})
+
     def test_url_social_and_coordinates_are_flagged(self):
         result = analyze_round(
             make_round(
