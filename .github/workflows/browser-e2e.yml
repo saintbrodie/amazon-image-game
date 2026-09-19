@@ -12,14 +12,19 @@ on:
       - "curate.js"
       - "curate-actions.js"
       - "curate-screening.js"
+      - "workspace-sync.js"
+      - "curate-shared.js"
       - "curate.css"
       - "curate-quality.css"
       - "curate-screening.css"
+      - "curate-shared.css"
       - "data/demo.json"
+      - "scripts/shared_workspace_server.py"
       - "scripts/shard_dataset.py"
       - "scripts/validate_shards.py"
       - "tests/e2e_game.js"
       - "tests/e2e_curator_productivity.js"
+      - "tests/e2e_shared_workspace.js"
       - "tests/build_e2e_pack.py"
       - ".github/workflows/browser-e2e.yml"
   push:
@@ -33,14 +38,19 @@ on:
       - "curate.js"
       - "curate-actions.js"
       - "curate-screening.js"
+      - "workspace-sync.js"
+      - "curate-shared.js"
       - "curate.css"
       - "curate-quality.css"
       - "curate-screening.css"
+      - "curate-shared.css"
       - "data/demo.json"
+      - "scripts/shared_workspace_server.py"
       - "scripts/shard_dataset.py"
       - "scripts/validate_shards.py"
       - "tests/e2e_game.js"
       - "tests/e2e_curator_productivity.js"
+      - "tests/e2e_shared_workspace.js"
       - "tests/build_e2e_pack.py"
       - ".github/workflows/browser-e2e.yml"
 
@@ -68,9 +78,14 @@ jobs:
           npm install --no-save playwright
           npx playwright install --with-deps chromium
 
-      - name: Start static server
+      - name: Start shared curator server
         run: |
-          python -m http.server 8000 --bind 127.0.0.1 > /tmp/amazon-image-game-http.log 2>&1 &
+          rm -f /tmp/amazon-image-game-workspaces.sqlite*
+          python scripts/shared_workspace_server.py \
+            --root . \
+            --db /tmp/amazon-image-game-workspaces.sqlite \
+            --host 127.0.0.1 \
+            --port 8000 > /tmp/amazon-image-game-http.log 2>&1 &
           echo $! > /tmp/amazon-image-game-http.pid
           for attempt in {1..30}; do
             if curl -fsS http://127.0.0.1:8000/ >/dev/null; then
@@ -87,6 +102,7 @@ jobs:
         run: |
           node tests/e2e_game.js
           node tests/e2e_curator_productivity.js
+          node tests/e2e_shared_workspace.js
 
       - name: Show server log on failure
         if: failure()
