@@ -15,12 +15,51 @@ function trackShardRequests(page) {
   return requests;
 }
 
+function shardIdsFromRequests(requests) {
+  return new Set([...requests].map((url) => {
+    const match = url.match(/\/data\/shards\/rounds-(\d+)\.json(?:[?#]|$)/);
+    return match?.[1] || null;
+  }).filter(Boolean));
+}
+
+function assertRequestedOnly(requests, expectedShardIds, message) {
+  assert.deepStrictEqual(
+    [...shardIdsFromRequests(requests)].sort(),
+    [...expectedShardIds].sort(),
+    message,
+  );
+}
+
+function curatorPriorityOrder(entries) {
+  const original = new Map(manifest.index.map((entry, index) => [entry.id, index]));
+  return [...entries].sort((left, right) => {
+    const leftValue = left.analysis?.curation_priority ?? -1;
+    const rightValue = right.analysis?.curation_priority ?? -1;
+    if (rightValue !== leftValue) return rightValue - leftValue;
+    return original.get(left.id) - original.get(right.id);
+  });
+}
+
 async function waitForPlayableGame(page) {
   await page.waitForSelector("#gameContent:not([hidden])");
   await page.waitForFunction(() => {
     const image = document.querySelector("#reviewImage");
     return image && image.complete && image.naturalWidth > 0;
   });
+}
+
+async function waitForCuratorRound(page, roundId) {
+  await page.waitForFunction(
+    (expected) => {
+      const content = document.querySelector("#content");
+      const id = document.querySelector("#roundId");
+      const image = document.querySelector("#reviewImage");
+      return content && !content.hidden
+        && id?.textContent === expected
+        && image && image.complete && image.naturalWidth > 0;
+    },
+    roundId,
+  );
 }
 
 (async function run() {
@@ -95,6 +134,61 @@ async function waitForPlayableGame(page) {
       assert.strictEqual(await page.locator("#challengeDate").textContent(), DAILY_DATE);
       assert.ok(shardRequests.size >= 1 && shardRequests.size <= 5);
       assert.ok(shardRequests.size < manifest.shards.length);
+      await context.close();
+    }
+
+    {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const shardRequests = trackShardRequests(page);
+      await page.addInitScript(() => localStorage.clear());
+
+      const ordered = curatorPriorityOrder(manifest.index);
+      const first = ordered[0];
+      await page.goto(`${BASE_URL}/curate.html`, { waitUntil: "domcontentloaded" });
+      await waitForCuratorRound(page, first.id);
+
+      const note = await page.locator("#datasetNote").textContent();
+      assert.match(note, /40 rounds/);
+      assert.match(note, /40 scored/);
+      assert.match(note, /40 screened/);
+      assert.match(note, /lazy sharded/);
+      assertRequestedOnly(
+        shardRequests,
+        new Set([first.shard]),
+        "curator startup should fetch only the shard containing the displayed round",
+      );
+
+      const highEntries = curatorPriorityOrder(manifest.index.filter((entry) => entry.screening?.high_risk));
+      assert.ok(highEntries.length >= 2, "fixture should include multiple high-risk curator rows");
+      const firstHigh = highEntries[0];
+      await page.selectOption("#screeningSelect", "high");
+      await waitForCuratorRound(page, firstHigh.id);
+      assert.strictEqual(await page.locator("#screeningStatus").textContent(), "High risk");
+      assert.match(await page.locator("#screeningFlags").textContent(), /fixture high risk/i);
+
+      const expectedAfterFilter = new Set([first.shard, firstHigh.shard]);
+      assertRequestedOnly(
+        shardRequests,
+        expectedAfterFilter,
+        "screening filter should select from manifest summaries without preloading unrelated shards",
+      );
+
+      const secondHigh = highEntries[1];
+      await page.click("#nextButton");
+      await waitForCuratorRound(page, secondHigh.id);
+      const expectedAfterNext = new Set([first.shard, firstHigh.shard, secondHigh.shard]);
+      assertRequestedOnly(
+        shardRequests,
+        expectedAfterNext,
+        "curator navigation should fetch only the newly displayed round's shard",
+      );
+      assert.ok(shardRequests.size < manifest.shards.length, "curator should not bulk-load every shard");
+
+      await page.selectOption("#screeningSelect", "clear");
+      const clearFirst = curatorPriorityOrder(manifest.index.filter((entry) => entry.screening?.needs_review === false))[0];
+      await waitForCuratorRound(page, clearFirst.id);
+      assert.strictEqual(await page.locator("#screeningStatus").textContent(), "Clear");
       await context.close();
     }
 
