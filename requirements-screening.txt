@@ -1,4 +1,5 @@
 # Optional dependencies for local image privacy/safety screening.
 # The core game and normal CI do not require these packages.
 Pillow>=10.0
-opencv-python-headless>=4.10
+# screen_dataset.py uses the OpenCV 4 CascadeClassifier API.
+opencv-python-headless>=4.10,<5
