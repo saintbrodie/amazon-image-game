@@ -40,6 +40,10 @@ function curatorPriorityOrder(entries) {
   });
 }
 
+function hasSignal(entry, name) {
+  return (entry.screening?.flags || []).some((flag) => flag.name === name);
+}
+
 async function waitForPlayableGame(page) {
   await page.waitForSelector("#gameContent:not([hidden])");
   await page.waitForFunction(() => {
@@ -60,6 +64,17 @@ async function waitForCuratorRound(page, roundId) {
     },
     roundId,
   );
+}
+
+async function readCuratorDecisions(page) {
+  return page.evaluate((signature) => {
+    const raw = localStorage.getItem(`mystery-cart-curation:${signature}`);
+    return raw ? JSON.parse(raw).decisions : {};
+  }, manifest.dataset_signature);
+}
+
+async function acceptNextDialog(page) {
+  page.once("dialog", async (dialog) => dialog.accept());
 }
 
 (async function run() {
@@ -189,6 +204,88 @@ async function waitForCuratorRound(page, roundId) {
       const clearFirst = curatorPriorityOrder(manifest.index.filter((entry) => entry.screening?.needs_review === false))[0];
       await waitForCuratorRound(page, clearFirst.id);
       assert.strictEqual(await page.locator("#screeningStatus").textContent(), "Clear");
+      await context.close();
+    }
+
+    {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      const shardRequests = trackShardRequests(page);
+      await page.addInitScript(() => localStorage.clear());
+
+      const ordered = curatorPriorityOrder(manifest.index);
+      const first = ordered[0];
+      await page.goto(`${BASE_URL}/curate.html`, { waitUntil: "domcontentloaded" });
+      await waitForCuratorRound(page, first.id);
+
+      const faceEntries = curatorPriorityOrder(manifest.index.filter((entry) => hasSignal(entry, "person_face_detected")));
+      assert.ok(faceEntries.length >= 2, "fixture should expose face signal rows in compact manifest summaries");
+      assert.ok(
+        await page.locator('#signalSelect option[value="person_face_detected"]').count(),
+        "face signal queue should be offered without loading every shard",
+      );
+      await page.selectOption("#signalSelect", "person_face_detected");
+      await waitForCuratorRound(page, faceEntries[0].id);
+      assert.match(await page.locator("#screeningFlags").textContent(), /person face detected/i);
+      assertRequestedOnly(
+        shardRequests,
+        new Set([first.shard, faceEntries[0].shard]),
+        "signal queue filter should not preload unrelated shards",
+      );
+
+      const highEntries = curatorPriorityOrder(manifest.index.filter((entry) => entry.screening?.high_risk));
+      await page.selectOption("#signalSelect", "all");
+      await page.selectOption("#screeningSelect", "high");
+      await waitForCuratorRound(page, highEntries[0].id);
+      await page.click("#keepButton");
+
+      const expectedRejectCount = highEntries.length - 1;
+      assert.strictEqual(
+        Number((await page.locator("#rejectHighCount").textContent()).replaceAll(",", "")),
+        expectedRejectCount,
+      );
+      await acceptNextDialog(page);
+      await page.click("#rejectHighButton");
+
+      let decisions = await readCuratorDecisions(page);
+      assert.strictEqual(decisions[highEntries[0].id], "keep", "bulk reject must preserve manual keep");
+      highEntries.slice(1).forEach((entry) => assert.strictEqual(decisions[entry.id], "reject"));
+      assert.match(await page.locator("#bulkStatus").textContent(), /bulk action applied/i);
+
+      await page.click("#undoBulkButton");
+      decisions = await readCuratorDecisions(page);
+      assert.strictEqual(decisions[highEntries[0].id], "keep", "undo must preserve earlier manual decision");
+      highEntries.slice(1).forEach((entry) => assert.strictEqual(decisions[entry.id], undefined));
+      assert.match(await page.locator("#bulkStatus").textContent(), /undid bulk action/i);
+      await context.close();
+    }
+
+    {
+      const context = await browser.newContext();
+      const page = await context.newPage();
+      await page.addInitScript(() => localStorage.clear());
+      await page.goto(`${BASE_URL}/curate.html`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector("#content:not([hidden])");
+
+      const clearLowPriority = manifest.index.filter((entry) => (
+        entry.screening?.needs_review === false
+        && typeof entry.analysis?.curation_priority === "number"
+        && entry.analysis.curation_priority <= 20
+      ));
+      assert.ok(clearLowPriority.length > 0, "fixture should include conservative auto-keep candidates");
+      assert.strictEqual(
+        Number((await page.locator("#keepClearCount").textContent()).replaceAll(",", "")),
+        clearLowPriority.length,
+      );
+
+      await acceptNextDialog(page);
+      await page.click("#keepClearButton");
+      let decisions = await readCuratorDecisions(page);
+      clearLowPriority.forEach((entry) => assert.strictEqual(decisions[entry.id], "keep"));
+
+      await page.click("#undoBulkButton");
+      decisions = await readCuratorDecisions(page);
+      clearLowPriority.forEach((entry) => assert.strictEqual(decisions[entry.id], undefined));
       await context.close();
     }
 
