@@ -1,0 +1,59 @@
+name: Retry curator productivity patch 2
+
+on:
+  push:
+    branches: [build/curator-productivity]
+    paths:
+      - ".github/workflows/retry2-curator-productivity.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build/curator-productivity
+
+      - name: Reuse patch script with corrected anchors
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          source = Path('.github/workflows/apply-curator-productivity.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "          PY\n\n          node --check curate.js"
+          start = source.index(start_marker) + len(start_marker)
+          end = source.index(end_marker, start)
+          code = textwrap.dedent(source[start:end])
+
+          replacements = [
+              (
+                  "'''    anchor.download = `curation-${state.datasetSignature}.json`;'''",
+                  "'''  anchor.download = `curation-${state.datasetSignature}.json`;'''",
+              ),
+              (
+                  "'''    const validIds = new Set(state.rounds.map((round) => round.id));",
+                  "'''  const validIds = new Set(state.rounds.map((round) => round.id));",
+              ),
+          ]
+          for old, new in replacements:
+              if old not in code:
+                  raise SystemExit(f'corrective anchor not found: {old[:50]}')
+              code = code.replace(old, new)
+
+          exec(compile(code, 'curator-productivity-patch', 'exec'))
+          PY
+          node --check curate.js
+          git diff --check
+
+      - name: Commit curator integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add curate.js
+          git commit -m "Persist curator annotations and queue presets"
+          git push origin HEAD:build/curator-productivity
