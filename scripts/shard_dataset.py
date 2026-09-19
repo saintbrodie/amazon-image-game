@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Split a browser-ready round pack into deterministic static shards.
 
-The manifest keeps only the lightweight information needed to choose rounds:
-round ID, source category, and shard ID. Full review text, image URLs, product
-metadata, and choices remain in shard files. A static browser can therefore
-select rounds first and fetch only the shard files that contain them.
+The manifest keeps only the lightweight information needed to choose and
+curate rounds: round ID, source category, shard ID, plus optional score and
+screening summaries. Full review text, image URLs, product metadata, choices,
+and screening detail remain in shard files. A static browser can therefore
+filter/select rounds first and fetch only the shard files it actually needs.
 """
 
 from __future__ import annotations
@@ -71,6 +72,60 @@ def safe_shard_prefix(value: str) -> PurePosixPath:
     return path
 
 
+def _finite_number(value: Any) -> int | float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value != value or value in {float("inf"), float("-inf")}:
+        return None
+    return value
+
+
+def manifest_index_entry(round_data: dict[str, Any], shard_id: str) -> dict[str, Any]:
+    """Return the intentionally small manifest entry used by game/curator UIs."""
+    entry: dict[str, Any] = {
+        "id": str(round_data["id"]),
+        "category": round_category(round_data),
+        "shard": shard_id,
+    }
+
+    analysis = round_data.get("analysis")
+    if isinstance(analysis, dict):
+        analysis_summary: dict[str, int | float] = {}
+        for field in ("curation_priority", "difficulty_score"):
+            value = _finite_number(analysis.get(field))
+            if value is not None:
+                analysis_summary[field] = value
+        if analysis_summary:
+            entry["analysis"] = analysis_summary
+
+    screening = round_data.get("screening")
+    if isinstance(screening, dict):
+        screening_summary: dict[str, Any] = {}
+        risk_score = _finite_number(screening.get("risk_score"))
+        if risk_score is not None:
+            screening_summary["risk_score"] = risk_score
+        if isinstance(screening.get("needs_review"), bool):
+            screening_summary["needs_review"] = screening["needs_review"]
+        if isinstance(screening.get("high_risk"), bool):
+            screening_summary["high_risk"] = screening["high_risk"]
+        severity_counts = screening.get("severity_counts")
+        if isinstance(severity_counts, dict):
+            compact_counts = {
+                key: int(value)
+                for key, value in severity_counts.items()
+                if key in {"low", "medium", "high"}
+                and isinstance(value, int)
+                and not isinstance(value, bool)
+                and value >= 0
+            }
+            if compact_counts:
+                screening_summary["severity_counts"] = compact_counts
+        if screening_summary:
+            entry["screening"] = screening_summary
+
+    return entry
+
+
 def shard_dataset(
     payload: dict[str, Any],
     *,
@@ -99,7 +154,7 @@ def shard_dataset(
 
     shards: list[tuple[str, dict[str, Any]]] = []
     shard_manifest: list[dict[str, Any]] = []
-    index: list[dict[str, str]] = []
+    index: list[dict[str, Any]] = []
     shard_prefix_path = safe_shard_prefix(shard_prefix)
 
     total_shards = (len(ordered) + shard_size - 1) // shard_size
@@ -137,14 +192,7 @@ def shard_dataset(
                 "categories": dict(sorted(chunk_categories.items())),
             }
         )
-        index.extend(
-            {
-                "id": str(round_data["id"]),
-                "category": round_category(round_data),
-                "shard": shard_id,
-            }
-            for round_data in chunk
-        )
+        index.extend(manifest_index_entry(round_data, shard_id) for round_data in chunk)
 
     manifest = {
         "version": 1,
