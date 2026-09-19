@@ -18,10 +18,10 @@
         <p>Keep the funny, clear rounds. Reject broken, boring, personal, or unfair ones.</p>
       </div>
       <div class="header-actions">
-        <button id="importButton" class="button secondary" type="button">Import decisions</button>
+        <button id="importButton" class="button secondary" type="button">Import workspace</button>
         <input id="importInput" type="file" accept="application/json,.json" hidden>
-        <button id="copyActionsButton" class="button secondary" type="button" onclick="navigator.clipboard.writeText(JSON.stringify(decisionExportPayload())).then(() => { const old = this.textContent; this.textContent = 'Copied'; setTimeout(() => { this.textContent = old; }, 1200); })">Copy Actions JSON</button>
-        <button id="exportButton" class="button" type="button">Export decisions</button>
+        <button id="copyActionsButton" class="button secondary" type="button" onclick="navigator.clipboard.writeText(JSON.stringify(actionsDecisionPayload())).then(() => { const old = this.textContent; this.textContent = 'Copied'; setTimeout(() => { this.textContent = old; }, 1200); })">Copy Actions JSON</button>
+        <button id="exportButton" class="button" type="button">Export workspace</button>
       </div>
     </header>
 
@@ -62,6 +62,10 @@
         <select id="signalSelect"><option value="all">All signals</option></select>
       </label>
       <label>
+        <span>Tag</span>
+        <select id="tagSelect"><option value="all">All tags</option></select>
+      </label>
+      <label>
         <span>Sort</span>
         <select id="sortSelect">
           <option value="priority" selected>Needs review first</option>
@@ -74,6 +78,16 @@
       <button id="previousButton" class="button secondary" type="button">Previous</button>
       <button id="nextButton" class="button secondary" type="button">Next</button>
       <button id="resetButton" class="button danger-quiet" type="button">Reset decisions</button>
+    </section>
+
+    <section class="preset-toolbar" aria-label="Saved curator queues">
+      <label>
+        <span>Queue preset</span>
+        <select id="presetSelect"><option value="">Choose a saved queue</option></select>
+      </label>
+      <button id="applyPresetButton" class="button secondary" type="button" disabled>Apply preset</button>
+      <button id="savePresetButton" class="button secondary" type="button">Save current queue</button>
+      <button id="deletePresetButton" class="button danger-quiet" type="button" disabled>Delete preset</button>
     </section>
 
     <section class="bulk-toolbar" aria-label="Bulk curation actions">
@@ -150,6 +164,18 @@
             <ol id="choiceList"></ol>
           </div>
 
+          <div class="annotation-box">
+            <label>
+              <span>Tags</span>
+              <input id="tagsInput" type="text" maxlength="800" placeholder="funny, ambiguous, needs title check">
+            </label>
+            <label>
+              <span>Operator note</span>
+              <textarea id="noteInput" rows="3" maxlength="4000" placeholder="Private curator note for this round"></textarea>
+            </label>
+            <p>Notes and tags stay in curator workspace data. They are not added to public game shards.</p>
+          </div>
+
           <a id="sourceLink" class="source-link" target="_blank" rel="noopener noreferrer" hidden>Open product source</a>
 
           <div class="decision-actions">
@@ -163,7 +189,7 @@
 
     <section class="empty-state" id="emptyState" hidden>
       <h2>Nothing matches this filter.</h2>
-      <p>Change the category/status/screening/signal filter, or export your decisions if you are done.</p>
+      <p>Change the category/status/screening/signal/tag filter, or export your workspace if you are done.</p>
     </section>
 
     <p class="dataset-note" id="datasetNote"></p>
@@ -173,6 +199,7 @@
   <script src="dataset-loader.js"></script>
   <script src="curate-screening.js"></script>
   <script src="curate-actions.js"></script>
+  <script src="curate-state.js"></script>
   <script src="curate.js" defer></script>
 </body>
 </html>
