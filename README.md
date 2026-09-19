@@ -19,8 +19,10 @@ The repository includes an original bundled demo plus streaming tools for the [M
 - Per-round private curator notes and tags with tag-based queues
 - Saved curator queue presets
 - Portable curator workspace export/import separated from compact deployment decisions
+- Optional shared multi-curator workspaces with SQLite revision history and three-way merge conflict handling
 - Heuristic difficulty and curation-priority scoring
 - Conservative privacy/review-media screening helpers
+- Optional local transformer image-safety classifier with human-review thresholds
 - Dataset audit reports
 - Optional local review-image caching
 - Exact and optional perceptual image deduplication
@@ -171,7 +173,7 @@ The audit includes category counts, ratings, difficulty buckets, quality flags, 
 
 ## Screen review media
 
-`scripts/screen_dataset.py` adds conservative curation signals for likely contact information, coordinates, privacy-sensitive EXIF metadata, and optional face/QR detection.
+`scripts/screen_dataset.py` adds conservative curation signals for likely contact information, coordinates, privacy-sensitive EXIF metadata, optional face/QR detection, and an optional local transformer image classifier.
 
 For cached local images:
 
@@ -186,7 +188,7 @@ python scripts/screen_dataset.py data/rounds.cached.json \
   --detect-qr
 ```
 
-`--exclude-high` removes only high-severity cases. Medium signals such as a likely face or QR code remain available for human review. See [`docs/screening.md`](docs/screening.md) for the intended workflow and limitations.
+`--exclude-high` removes only high-severity cases. Medium signals such as a likely face or QR code remain available for human review. See [`docs/screening.md`](docs/screening.md) for the intended workflow, optional transformer classifier, thresholds, and limitations.
 
 ## Curate a generated pack
 
@@ -219,6 +221,20 @@ The curator supports:
 - **Copy Actions JSON** for a compact deployment payload containing only dataset signature and keep/reject IDs
 
 Operator notes, tags, and presets stay in the curator workspace and are not copied into public game shards or the compact deployment payload. See [`docs/curator-workspace.md`](docs/curator-workspace.md) for the workspace model and portability details.
+
+### Shared multi-curator mode
+
+Local-only curation remains the default. To share decisions, notes, tags, and queue presets between multiple curators, run the bundled SQLite workspace service instead of a plain static server:
+
+```bash
+python scripts/shared_workspace_server.py \
+  --root . \
+  --db data/curator-workspaces.sqlite
+```
+
+Open `http://127.0.0.1:8000/curate.html`, enter an operator name in **Shared workspace**, and click **Connect**. Disjoint edits merge automatically using revision history. If two curators change the same decision, annotation record, or named queue after their common base revision, the UI surfaces an explicit conflict instead of silently using last-write-wins.
+
+The deployment artifact also includes `tools/shared_workspace_server.py`, so an extracted site can opt into the same shared mode. For LAN, bearer-token, cross-origin, HTTPS/reverse-proxy, revision-history, and conflict details, see [`docs/shared-curation.md`](docs/shared-curation.md).
 
 Apply exported deployment decisions offline:
 
@@ -367,22 +383,27 @@ node --check dataset-loader.js
 node --check app.js
 node --check curate-screening.js
 node --check curate-actions.js
+node --check workspace-sync.js
+node --check curate-shared.js
 node --check curate.js
 node tests/test_game_core.js
 node tests/test_dataset_loader.js
 node tests/test_curate_screening.js
 node tests/test_curate_actions.js
 node tests/test_curate_state.js
+node tests/test_workspace_sync.js
 python -m compileall -q scripts tests
 python scripts/validate_dataset.py data/demo.json
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-Normal CI stays lightweight and network-free. Separate workflows cover the Chromium and expensive real-data integration paths.
+Normal CI stays lightweight and network-free. Separate workflows cover Chromium, including real two-curator synchronization against SQLite, and the expensive real-data integration paths.
 
 ## GitHub Pages
 
 The game has no build step and can be served as static files. The bundled demo works immediately. Generated real-data packs and cached review images are ignored by Git by default because they can be large and because publishing third-party review media should be an intentional decision.
+
+Shared curation requires the optional workspace service or another API implementing the same synchronization contract; plain GitHub Pages remains local-only curator mode.
 
 ## Content and rights note
 
@@ -390,5 +411,5 @@ This project is not affiliated with or endorsed by Amazon. The bundled demo artw
 
 ## Next technical milestones
 
-- Stronger optional image-safety model integration while keeping human review in the loop
-- Shared/multi-curator workspace support if curation moves beyond a single operator/browser
+- Optional production-grade shared-workspace storage/auth adapters for larger or internet-facing teams
+- Real-world calibration/benchmarking of optional image-model thresholds on curated review-media samples
