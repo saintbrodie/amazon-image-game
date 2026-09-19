@@ -1,4 +1,3 @@
-import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -10,7 +9,6 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from shared_workspace_server import (  # noqa: E402
     WorkspaceStore,
-    empty_workspace,
     merge_workspaces,
     normalize_workspace,
 )
@@ -150,8 +148,14 @@ class WorkspaceStoreTests(unittest.TestCase):
         self.assertEqual(result["workspace"]["decisions"]["a"], "reject")
         self.assertEqual(result["resolved_conflicts"], 1)
 
-    def test_unknown_old_base_revision_is_rejected(self):
-        with self.assertRaisesRegex(ValueError, "no longer available"):
+    def test_future_base_revision_is_rejected(self):
+        self.store.save(
+            "sig",
+            base_revision=0,
+            workspace=workspace(decisions={"a": "keep"}),
+            actor="Alice",
+        )
+        with self.assertRaisesRegex(ValueError, "newer than the shared workspace"):
             self.store.save(
                 "sig",
                 base_revision=9,
