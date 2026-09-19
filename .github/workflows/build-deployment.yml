@@ -1,0 +1,237 @@
+name: Build deployment artifact
+
+on:
+  workflow_dispatch:
+    inputs:
+      categories:
+        description: "Space-separated Amazon Reviews 2023 category keys"
+        required: true
+        default: "All_Beauty"
+        type: string
+      limit:
+        description: "Maximum playable rounds"
+        required: true
+        default: "250"
+        type: string
+      shard_size:
+        description: "Rounds per static shard"
+        required: true
+        default: "75"
+        type: string
+      inspect_images:
+        description: "Inspect cached images for metadata/privacy signals"
+        required: true
+        default: true
+        type: boolean
+      detect_faces:
+        description: "Flag likely faces for human review"
+        required: true
+        default: true
+        type: boolean
+      detect_qr:
+        description: "Flag QR codes for human review"
+        required: true
+        default: true
+        type: boolean
+      exclude_high:
+        description: "Exclude high-confidence privacy/problem flags"
+        required: true
+        default: true
+        type: boolean
+  pull_request:
+    paths:
+      - ".github/workflows/build-deployment.yml"
+      - "scripts/cache_images.py"
+      - "scripts/screen_dataset.py"
+      - "scripts/shard_dataset.py"
+      - "scripts/validate_shards.py"
+      - "dataset-loader.js"
+      - "app.js"
+      - "index.html"
+
+concurrency:
+  group: deployment-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      CATEGORIES: ${{ github.event_name == 'pull_request' && 'fixture' || inputs.categories }}
+      ROUND_LIMIT: ${{ github.event_name == 'pull_request' && '6' || inputs.limit }}
+      SHARD_SIZE: ${{ github.event_name == 'pull_request' && '2' || inputs.shard_size }}
+      INSPECT_IMAGES: ${{ github.event_name == 'pull_request' && 'true' || inputs.inspect_images }}
+      DETECT_FACES: ${{ github.event_name == 'pull_request' && 'true' || inputs.detect_faces }}
+      DETECT_QR: ${{ github.event_name == 'pull_request' && 'true' || inputs.detect_qr }}
+      EXCLUDE_HIGH: ${{ github.event_name == 'pull_request' && 'false' || inputs.exclude_high }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install image screening dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements-screening.txt
+
+      - name: Prepare source pack
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p work site/data site/assets/review-cache reports
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            cp data/demo.json work/rounds.json
+          else
+            read -r -a category_array <<< "$CATEGORIES"
+            python scripts/build_pack.py \
+              --categories "${category_array[@]}" \
+              --limit "$ROUND_LIMIT" \
+              --continue-on-error \
+              --output work/rounds.json
+          fi
+          python scripts/validate_dataset.py work/rounds.json
+
+      - name: Score and audit source rounds
+        run: |
+          set -euo pipefail
+          python scripts/score_dataset.py work/rounds.json --output work/rounds.scored.json
+          python scripts/validate_dataset.py work/rounds.scored.json
+          python scripts/audit_dataset.py work/rounds.scored.json --json --output reports/audit-before-screening.json
+          python scripts/audit_dataset.py work/rounds.scored.json > reports/audit-before-screening.txt
+
+      - name: Cache and deduplicate review images
+        run: |
+          set -euo pipefail
+          python scripts/cache_images.py work/rounds.scored.json \
+            --output work/rounds.cached.json \
+            --asset-dir site/assets/review-cache \
+            --public-prefix assets/review-cache \
+            --web-root . \
+            --perceptual-threshold 4 \
+            --workers 12
+          python scripts/validate_dataset.py work/rounds.cached.json
+
+      - name: Screen privacy and review signals
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            work/rounds.cached.json
+            --output work/rounds.screened.json
+            --report reports/screening-report.json
+            --image-root site
+          )
+          if [[ "$INSPECT_IMAGES" == "true" ]]; then
+            args+=(--inspect-images)
+            if [[ "$DETECT_FACES" == "true" ]]; then args+=(--detect-faces); fi
+            if [[ "$DETECT_QR" == "true" ]]; then args+=(--detect-qr); fi
+          fi
+          if [[ "$EXCLUDE_HIGH" == "true" ]]; then args+=(--exclude-high); fi
+          python scripts/screen_dataset.py "${args[@]}"
+          python scripts/validate_dataset.py work/rounds.screened.json
+          python scripts/audit_dataset.py work/rounds.screened.json --json --output reports/audit-after-screening.json
+          python scripts/audit_dataset.py work/rounds.screened.json > reports/audit-after-screening.txt
+
+      - name: Build and validate static shards
+        run: |
+          set -euo pipefail
+          python scripts/shard_dataset.py work/rounds.screened.json \
+            --manifest site/data/rounds.manifest.json \
+            --shard-size "$SHARD_SIZE" \
+            --shard-prefix shards/rounds
+          python scripts/validate_shards.py site/data/rounds.manifest.json
+
+      - name: Assemble static game site
+        run: |
+          set -euo pipefail
+          cp index.html styles.css controls.css daily.css game-core.js dataset-loader.js app.js site/
+          cat > site/CONTENT_RIGHTS_NOTICE.txt <<'EOF'
+          This artifact may contain third-party customer review media from the
+          McAuley Lab Amazon Reviews 2023 dataset. Dataset availability is not
+          itself a grant to republish every image. Confirm the rights and terms
+          applicable to your deployment before publishing this artifact.
+          EOF
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          screening = json.loads(Path("reports/screening-report.json").read_text(encoding="utf-8"))
+          manifest = json.loads(Path("site/data/rounds.manifest.json").read_text(encoding="utf-8"))
+          info = {
+              "source": "fixture" if "${{ github.event_name }}" == "pull_request" else "McAuley Lab Amazon Reviews 2023",
+              "categories_input": "${{ env.CATEGORIES }}",
+              "requested_round_limit": "${{ env.ROUND_LIMIT }}",
+              "shard_size": int("${{ env.SHARD_SIZE }}"),
+              "rounds_deployed": manifest["round_count"],
+              "dataset_signature": manifest["dataset_signature"],
+              "screening": screening,
+              "github_run_id": "${{ github.run_id }}",
+              "github_sha": "${{ github.sha }}",
+          }
+          Path("site/build-info.json").write_text(json.dumps(info, indent=2), encoding="utf-8")
+          PY
+
+      - name: Static HTTP smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m http.server 8765 --directory site > /tmp/amazon-image-game-http.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for _ in {1..20}; do
+            if curl -fsS http://127.0.0.1:8765/ >/dev/null; then break; fi
+            sleep 0.25
+          done
+          curl -fsS http://127.0.0.1:8765/data/rounds.manifest.json > /tmp/manifest.json
+          shard_path=$(python - <<'PY'
+          import json
+          print(json.load(open('/tmp/manifest.json'))['shards'][0]['path'])
+          PY
+          )
+          curl -fsS "http://127.0.0.1:8765/data/${shard_path}" >/dev/null
+          test -s site/build-info.json
+          test -n "$(find site/assets/review-cache -type f -print -quit)"
+
+      - name: Write workflow summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Deployment pack build"
+            echo
+            echo "- Event: \`${{ github.event_name }}\`"
+            echo "- Categories: \`${CATEGORIES}\`"
+            echo "- Requested limit: \`${ROUND_LIMIT}\`"
+            echo "- Shard size: \`${SHARD_SIZE}\`"
+            if [[ -f reports/screening-report.json ]]; then
+              echo
+              echo "### Screening"
+              echo '```json'
+              cat reports/screening-report.json
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload deployable static site
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: amazon-image-game-site-${{ github.run_id }}
+          path: site/
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: amazon-image-game-reports-${{ github.run_id }}
+          path: |
+            reports/
+            work/rounds.json
+            work/rounds.scored.json
+            work/rounds.cached.json
+            work/rounds.screened.json
+          retention-days: 14
+          if-no-files-found: warn
