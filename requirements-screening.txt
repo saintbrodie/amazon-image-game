@@ -1,0 +1,4 @@
+# Optional dependencies for local image privacy/safety screening.
+# The core game and normal CI do not require these packages.
+Pillow>=10.0
+opencv-python-headless>=4.10
