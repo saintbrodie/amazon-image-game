@@ -38,10 +38,21 @@ on:
         required: true
         default: true
         type: boolean
+      curation_json:
+        description: "Optional exported curator JSON. Paste the complete decisions file contents."
+        required: false
+        default: ""
+        type: string
+      only_kept:
+        description: "When curation JSON is supplied, deploy only explicit keeps"
+        required: true
+        default: false
+        type: boolean
   pull_request:
     paths:
       - ".github/workflows/build-deployment.yml"
       - "requirements-screening.txt"
+      - "scripts/apply_curation.py"
       - "scripts/cache_images.py"
       - "scripts/screen_dataset.py"
       - "scripts/shard_dataset.py"
@@ -51,6 +62,7 @@ on:
       - "index.html"
       - "curate.html"
       - "curate.js"
+      - "curate-actions.js"
       - "curate-screening.js"
       - "curate.css"
       - "curate-quality.css"
@@ -72,6 +84,8 @@ jobs:
       DETECT_FACES: ${{ github.event_name == 'pull_request' && 'true' || inputs.detect_faces }}
       DETECT_QR: ${{ github.event_name == 'pull_request' && 'true' || inputs.detect_qr }}
       EXCLUDE_HIGH: ${{ github.event_name == 'pull_request' && 'false' || inputs.exclude_high }}
+      CURATION_JSON: ${{ github.event_name == 'pull_request' && '' || inputs.curation_json }}
+      ONLY_KEPT: ${{ github.event_name == 'pull_request' && 'false' || inputs.only_kept }}
     steps:
       - uses: actions/checkout@v4
 
@@ -104,7 +118,6 @@ jobs:
               pixels = []
               for y in range(height):
                   for x in range(width):
-                      # Deterministic photo-like texture with a per-round spatial bias.
                       base = rng.randrange(35, 220)
                       bias = ((x * (index + 3) + y * (index + 5)) % 71) - 35
                       value = max(0, min(255, base + bias))
@@ -168,10 +181,81 @@ jobs:
           python scripts/audit_dataset.py work/rounds.screened.json --json --output reports/audit-after-screening.json
           python scripts/audit_dataset.py work/rounds.screened.json > reports/audit-after-screening.txt
 
+      - name: Apply optional curator decisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp work/rounds.screened.json work/rounds.curated.json
+          apply_curation=false
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            python - <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "scripts")
+          from apply_curation import dataset_signature
+
+          dataset = json.loads(Path("work/rounds.screened.json").read_text(encoding="utf-8"))
+          decisions = {
+              "version": 1,
+              "dataset_signature": dataset_signature(dataset["rounds"]),
+              "kept_ids": [],
+              "rejected_ids": [dataset["rounds"][0]["id"]],
+          }
+          Path("work/curation.json").write_text(json.dumps(decisions), encoding="utf-8")
+          PY
+            apply_curation=true
+          elif [[ -n "${CURATION_JSON//[[:space:]]/}" ]]; then
+            python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(os.environ["CURATION_JSON"])
+          if not isinstance(payload, dict):
+              raise SystemExit("curation_json must decode to a JSON object")
+          Path("work/curation.json").write_text(json.dumps(payload), encoding="utf-8")
+          PY
+            apply_curation=true
+          fi
+
+          if [[ "$apply_curation" == "true" ]]; then
+            args=(
+              --dataset work/rounds.screened.json
+              --decisions work/curation.json
+              --output work/rounds.curated.json
+            )
+            if [[ "$ONLY_KEPT" == "true" ]]; then args+=(--only-kept); fi
+            python scripts/apply_curation.py "${args[@]}"
+            python scripts/validate_dataset.py work/rounds.curated.json
+            python scripts/audit_dataset.py work/rounds.curated.json --json --output reports/audit-after-curation.json
+            python scripts/audit_dataset.py work/rounds.curated.json > reports/audit-after-curation.txt
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("work/rounds.curated.json").read_text(encoding="utf-8"))
+          report = {"applied": True, **payload.get("curation", {})}
+          Path("reports/curation-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+          PY
+          else
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          payload = json.loads(Path("work/rounds.curated.json").read_text(encoding="utf-8"))
+          report = {
+              "applied": False,
+              "rounds_before": len(payload.get("rounds", [])),
+              "rounds_after": len(payload.get("rounds", [])),
+          }
+          Path("reports/curation-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+          PY
+          fi
+
       - name: Build and validate static shards
         run: |
           set -euo pipefail
-          python scripts/shard_dataset.py work/rounds.screened.json \
+          python scripts/shard_dataset.py work/rounds.curated.json \
             --manifest site/data/rounds.manifest.json \
             --shard-size "$SHARD_SIZE" \
             --shard-prefix shards/rounds
@@ -181,7 +265,7 @@ jobs:
         run: |
           set -euo pipefail
           cp index.html styles.css controls.css daily.css game-core.js dataset-loader.js app.js \
-            curate.html curate.js curate-screening.js curate.css curate-quality.css curate-screening.css site/
+            curate.html curate.js curate-actions.js curate-screening.js curate.css curate-quality.css curate-screening.css site/
           cat > site/CONTENT_RIGHTS_NOTICE.txt <<'EOF'
           This artifact may contain third-party customer review media from the
           McAuley Lab Amazon Reviews 2023 dataset. Dataset availability is not
@@ -193,6 +277,7 @@ jobs:
           from pathlib import Path
 
           screening = json.loads(Path("reports/screening-report.json").read_text(encoding="utf-8"))
+          curation = json.loads(Path("reports/curation-report.json").read_text(encoding="utf-8"))
           manifest = json.loads(Path("site/data/rounds.manifest.json").read_text(encoding="utf-8"))
           info = {
               "source": "fixture" if "${{ github.event_name }}" == "pull_request" else "McAuley Lab Amazon Reviews 2023",
@@ -202,6 +287,7 @@ jobs:
               "rounds_deployed": manifest["round_count"],
               "dataset_signature": manifest["dataset_signature"],
               "screening": screening,
+              "curation": curation,
               "github_run_id": "${{ github.run_id }}",
               "github_sha": "${{ github.sha }}",
           }
@@ -229,6 +315,16 @@ jobs:
           curl -fsS "http://127.0.0.1:8765/data/${shard_path}" >/dev/null
           test -s site/build-info.json
           test -n "$(find site/assets/review-cache -type f -print -quit)"
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            python - <<'PY'
+          import json
+          manifest = json.load(open('/tmp/manifest.json'))
+          info = json.load(open('site/build-info.json'))
+          assert manifest['round_count'] == 5, manifest['round_count']
+          assert info['curation']['applied'] is True
+          assert info['curation']['rejected_present'] == 1
+          PY
+          fi
 
       - name: Write workflow summary
         if: always()
@@ -246,6 +342,13 @@ jobs:
               echo "### Screening"
               echo '```json'
               cat reports/screening-report.json
+              echo '```'
+            fi
+            if [[ -f reports/curation-report.json ]]; then
+              echo
+              echo "### Curation"
+              echo '```json'
+              cat reports/curation-report.json
               echo '```'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
@@ -270,5 +373,7 @@ jobs:
             work/rounds.scored.json
             work/rounds.cached.json
             work/rounds.screened.json
+            work/rounds.curated.json
+            work/curation.json
           retention-days: 14
           if-no-files-found: warn
