@@ -1,5 +1,5 @@
 const assert = require("assert");
-const CuratorState = require("../curate-state.js");
+const CuratorState = require("../curate-actions.js").state;
 
 (function run() {
   assert.deepStrictEqual(
@@ -55,6 +55,7 @@ const CuratorState = require("../curate-state.js");
     sort: "screening",
     maxPriority: 100,
   });
+
   assert.strictEqual(CuratorState.normalizePreset({ name: "Zero", maxPriority: 0 }).maxPriority, 0);
 
   let presets = CuratorState.upsertPreset([], preset);
