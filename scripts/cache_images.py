@@ -133,7 +133,10 @@ def dhash64(data: bytes) -> int:
 
     with Image.open(io.BytesIO(data)) as image:
         image = ImageOps.exif_transpose(image).convert("L").resize((9, 8), Image.Resampling.LANCZOS)
-        pixels = list(image.getdata())
+        if hasattr(image, "get_flattened_data"):
+            pixels = list(image.get_flattened_data())
+        else:
+            pixels = list(image.getdata())
     value = 0
     bit = 0
     for row in range(8):

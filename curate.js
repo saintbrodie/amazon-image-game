@@ -8,6 +8,7 @@ const state = {
   decisions: {},
   category: "all",
   status: "undecided",
+  screening: "all",
   sort: "priority",
   filtered: [],
   index: 0,
@@ -29,6 +30,9 @@ const els = {
   priorityScore: document.querySelector("#priorityScore"),
   difficultyScore: document.querySelector("#difficultyScore"),
   qualityFlags: document.querySelector("#qualityFlags"),
+  screeningRisk: document.querySelector("#screeningRisk"),
+  screeningStatus: document.querySelector("#screeningStatus"),
+  screeningFlags: document.querySelector("#screeningFlags"),
   reviewStars: document.querySelector("#reviewStars"),
   reviewTitle: document.querySelector("#reviewTitle"),
   reviewText: document.querySelector("#reviewText"),
@@ -40,11 +44,13 @@ const els = {
   nextButton: document.querySelector("#nextButton"),
   categorySelect: document.querySelector("#categorySelect"),
   statusSelect: document.querySelector("#statusSelect"),
+  screeningSelect: document.querySelector("#screeningSelect"),
   sortSelect: document.querySelector("#sortSelect"),
   reviewedStat: document.querySelector("#reviewedStat"),
   keptStat: document.querySelector("#keptStat"),
   rejectedStat: document.querySelector("#rejectedStat"),
   remainingStat: document.querySelector("#remainingStat"),
+  flaggedStat: document.querySelector("#flaggedStat"),
   exportButton: document.querySelector("#exportButton"),
   importButton: document.querySelector("#importButton"),
   importInput: document.querySelector("#importInput"),
@@ -141,7 +147,11 @@ function analysisNumber(round, field) {
 }
 
 function compareRounds(left, right) {
-  if (state.sort === "priority") {
+  if (state.sort === "screening") {
+    const leftValue = CuratorScreening.riskScore(left) ?? -1;
+    const rightValue = CuratorScreening.riskScore(right) ?? -1;
+    if (rightValue !== leftValue) return rightValue - leftValue;
+  } else if (state.sort === "priority") {
     const leftValue = analysisNumber(left, "curation_priority") ?? -1;
     const rightValue = analysisNumber(right, "curation_priority") ?? -1;
     if (rightValue !== leftValue) return rightValue - leftValue;
@@ -160,7 +170,8 @@ function compareRounds(left, right) {
 function rebuildFilter({ preserveRoundId = null } = {}) {
   state.filtered = state.rounds.filter((round) => {
     const categoryMatch = state.category === "all" || categoryKey(round) === state.category;
-    return categoryMatch && matchesStatus(round);
+    const screeningMatch = CuratorScreening.matches(round, state.screening);
+    return categoryMatch && matchesStatus(round) && screeningMatch;
   });
   state.filtered.sort(compareRounds);
 
@@ -205,12 +216,49 @@ function renderStats() {
   els.keptStat.textContent = kept.toLocaleString();
   els.rejectedStat.textContent = rejected.toLocaleString();
   els.remainingStat.textContent = Math.max(0, state.rounds.length - reviewed).toLocaleString();
+  const flagged = state.rounds.filter((round) => CuratorScreening.needsReview(round)).length;
+  els.flaggedStat.textContent = flagged.toLocaleString();
 }
 
 function renderDecision(round) {
   const decision = state.decisions[round.id] || "undecided";
   els.decisionPill.textContent = decision === "undecided" ? "Undecided" : decision === "keep" ? "Kept" : "Rejected";
   els.decisionPill.className = `decision-pill ${decision === "undecided" ? "" : decision}`.trim();
+}
+
+function renderScreening(round) {
+  const screening = CuratorScreening.screening(round);
+  const risk = CuratorScreening.riskScore(round);
+  els.screeningRisk.textContent = risk === null ? "Not screened" : `${risk}/100`;
+  els.screeningStatus.textContent = CuratorScreening.statusLabel(round);
+
+  if (!screening) {
+    const item = document.createElement("li");
+    item.textContent = "Run scripts/screen_dataset.py to add screening signals";
+    item.className = "screening-note";
+    els.screeningFlags.replaceChildren(item);
+    return;
+  }
+
+  const flags = CuratorScreening.sortedFlags(round);
+  if (!flags.length) {
+    const item = document.createElement("li");
+    item.textContent = "No screening flags";
+    item.className = "screening-clear";
+    els.screeningFlags.replaceChildren(item);
+    return;
+  }
+
+  els.screeningFlags.replaceChildren(...flags.map((flag) => {
+    const item = document.createElement("li");
+    const source = cleanText(flag.source);
+    item.textContent = source
+      ? `${humanizeFlag(flag.name)} · ${source.replaceAll("_", " ")}`
+      : humanizeFlag(flag.name);
+    const severity = ["low", "medium", "high"].includes(flag.severity) ? flag.severity : "low";
+    item.className = `screening-${severity}`;
+    return item;
+  }));
 }
 
 function renderAnalysis(round) {
@@ -262,6 +310,7 @@ function render() {
   els.reviewText.textContent = cleanText(round.review_text, "No review text.");
   renderChoiceList(round);
   renderDecision(round);
+  renderScreening(round);
   renderAnalysis(round);
 
   els.imageFallback.hidden = true;
@@ -388,6 +437,11 @@ function bindEvents() {
     state.index = 0;
     rebuildFilter();
   });
+  els.screeningSelect.addEventListener("change", () => {
+    state.screening = els.screeningSelect.value;
+    state.index = 0;
+    rebuildFilter();
+  });
   els.sortSelect.addEventListener("change", () => {
     const currentId = currentRound()?.id || null;
     state.sort = els.sortSelect.value;
@@ -422,7 +476,9 @@ async function init() {
     state.decisions = loadStoredDecisions();
     populateCategories();
     const scored = state.rounds.filter((round) => round.analysis && typeof round.analysis === "object").length;
-    els.datasetNote.textContent = `${payload.name || source} · ${state.rounds.length.toLocaleString()} rounds · ${scored.toLocaleString()} scored · signature ${state.datasetSignature}`;
+    const screened = state.rounds.filter((round) => CuratorScreening.screening(round)).length;
+    const flagged = state.rounds.filter((round) => CuratorScreening.needsReview(round)).length;
+    els.datasetNote.textContent = `${payload.name || source} · ${state.rounds.length.toLocaleString()} rounds · ${scored.toLocaleString()} scored · ${screened.toLocaleString()} screened · ${flagged.toLocaleString()} flagged · signature ${state.datasetSignature}`;
     rebuildFilter();
   } catch (error) {
     els.loadingState.textContent = `Could not load rounds: ${error.message}`;
