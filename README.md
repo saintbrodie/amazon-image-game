@@ -13,14 +13,18 @@ The repository includes an original bundled demo plus streaming tools for the [M
 - Deterministic five-round daily challenge with shareable results
 - Broken-image skip handling
 - Browser-based keep/reject curator
+- Screening-aware curator filters, sorting, and risk badges
 - Heuristic difficulty and curation-priority scoring
+- Conservative privacy/review-media screening helpers
 - Dataset audit reports
 - Optional local review-image caching
 - Exact and optional perceptual image deduplication
 - Streaming Amazon Reviews 2023 ingestion with bounded memory
 - Pack-level distractor reranking for more plausible wrong answers
+- Deterministic static sharding with lazy browser loading
+- Manual GitHub Actions workflow that produces a ready-to-host static-site artifact
+- Chromium end-to-end tests for the sharded browser path
 - Mobile-friendly, framework-free UI
-- Lightweight unit CI plus an optional real-data integration workflow
 
 ## Run the game
 
@@ -30,7 +34,7 @@ python -m http.server 8000
 
 Open `http://localhost:8000`.
 
-The browser first tries `data/rounds.json` and falls back to the bundled `data/demo.json`.
+The browser prefers `data/rounds.manifest.json` when a sharded pack exists, otherwise it tries `data/rounds.json` and falls back to the bundled `data/demo.json`.
 
 ## Daily challenge
 
@@ -156,6 +160,25 @@ python scripts/audit_dataset.py data/rounds.scored.json --json --output data/aud
 
 The audit includes category counts, ratings, difficulty buckets, quality flags, review-image hosts, verified-purchase counts, and helpful-vote counts. Scores are triage aids, not ground truth.
 
+## Screen review media
+
+`scripts/screen_dataset.py` adds conservative curation signals for likely contact information, coordinates, privacy-sensitive EXIF metadata, and optional face/QR detection.
+
+For cached local images:
+
+```bash
+python -m pip install -r requirements-screening.txt
+python scripts/screen_dataset.py data/rounds.cached.json \
+  --output data/rounds.screened.json \
+  --report data/screening-report.json \
+  --image-root . \
+  --inspect-images \
+  --detect-faces \
+  --detect-qr
+```
+
+`--exclude-high` removes only high-severity cases. Medium signals such as a likely face or QR code remain available for human review. See [`docs/screening.md`](docs/screening.md) for the intended workflow and limitations.
+
 ## Curate a generated pack
 
 Serve the repo and open:
@@ -170,7 +193,9 @@ The curator supports:
 - `R` to reject
 - left/right arrows to navigate
 - category and decision filters
-- sorting by curation priority or difficulty
+- screening filters for flagged, high-risk, clear, or unscreened rounds
+- sorting by curation priority, screening risk, or difficulty
+- visible screening severity badges and risk score
 - review/product/choice inspection
 - portable JSON decision export/import
 
@@ -178,7 +203,7 @@ Apply exported decisions offline:
 
 ```bash
 python scripts/apply_curation.py \
-  --dataset data/rounds.scored.json \
+  --dataset data/rounds.screened.json \
   --decisions curation-<signature>.json \
   --output data/rounds.curated.json
 ```
@@ -209,9 +234,32 @@ python scripts/cache_images.py data/rounds.curated.json \
 
 The perceptual mode uses a 64-bit dHash and Hamming distance. `4` is a conservative starting point.
 
+## Static sharding
+
+Large packs can be split into deterministic static shards:
+
+```bash
+python scripts/shard_dataset.py data/rounds.screened.json \
+  --manifest data/rounds.manifest.json \
+  --shard-size 75 \
+  --shard-prefix shards/rounds
+
+python scripts/validate_shards.py data/rounds.manifest.json
+```
+
+The browser reads the lightweight manifest first and fetches only the shards needed for the selected game. See [`docs/sharding.md`](docs/sharding.md).
+
+## Build a deployable artifact in GitHub Actions
+
+The **Build deployment artifact** workflow can turn selected real Amazon Reviews 2023 categories into a ready-to-host static-site ZIP.
+
+It runs build, scoring, auditing, image caching, perceptual deduplication, screening, sharding, shard validation, and an HTTP smoke test before uploading the site and a separate reports artifact.
+
+See [`docs/deployment.md`](docs/deployment.md) for the workflow inputs and artifact layout.
+
 ## Real-data GitHub Actions test
 
-`.github/workflows/real-data-integration.yml` runs the complete networked path against an actual Amazon Reviews 2023 category:
+`.github/workflows/real-data-integration.yml` runs the complete networked data path against an actual Amazon Reviews 2023 category:
 
 1. Verify current Hugging Face source files.
 2. Stream reviews and metadata.
@@ -239,21 +287,25 @@ At a high level:
 8. Optionally verify selected review-image URLs.
 9. Balance categories and deduplicate products.
 10. Rerank the accumulated candidate-title bank for stronger final choices.
-11. Optionally score, audit, curate, cache, and image-dedupe the pack.
+11. Optionally score, audit, cache, screen, curate, and shard the pack.
 
 ## Tests
 
 ```bash
 node --check game-core.js
+node --check dataset-loader.js
 node --check app.js
+node --check curate-screening.js
 node --check curate.js
 node tests/test_game_core.js
+node tests/test_dataset_loader.js
+node tests/test_curate_screening.js
 python -m compileall -q scripts tests
 python scripts/validate_dataset.py data/demo.json
 python -m unittest discover -s tests -p 'test_*.py' -v
 ```
 
-Normal CI stays lightweight and network-free. The separate real-data workflow covers the expensive integration path.
+Normal CI stays lightweight and network-free. Separate workflows cover the Chromium and expensive real-data integration paths.
 
 ## GitHub Pages
 
@@ -265,7 +317,7 @@ This project is not affiliated with or endorsed by Amazon. The bundled demo artw
 
 ## Next technical milestones
 
-- Moderation helpers for unsafe or personally identifying review images
-- Static sharding for very large packs
-- Optional tiny API/object-storage mode for larger rotating pools
+- Curator support for very large sharded packs without reconstructing a full local JSON file
 - Better image-cache pruning/reporting across repeated cache runs
+- Optional object-storage publishing for large rotating pools
+- Stronger optional image-safety model integration while keeping human review in the loop
