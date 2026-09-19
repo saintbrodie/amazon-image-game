@@ -81,7 +81,35 @@ jobs:
           set -euo pipefail
           mkdir -p work site/data site/assets/review-cache reports
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            cp data/demo.json work/rounds.json
+            python - <<'PY'
+          import json
+          import random
+          from pathlib import Path
+          from PIL import Image
+
+          payload = json.loads(Path("data/demo.json").read_text(encoding="utf-8"))
+          fixture_dir = Path("work/fixture-images")
+          fixture_dir.mkdir(parents=True, exist_ok=True)
+
+          for index, round_data in enumerate(payload["rounds"]):
+              rng = random.Random(10_000 + index)
+              width, height = 192, 160
+              pixels = []
+              for y in range(height):
+                  for x in range(width):
+                      # Deterministic photo-like texture with a per-round spatial bias.
+                      base = rng.randrange(35, 220)
+                      bias = ((x * (index + 3) + y * (index + 5)) % 71) - 35
+                      value = max(0, min(255, base + bias))
+                      pixels.append((value, (value + 37 * index) % 256, (255 - value + 19 * index) % 256))
+              image = Image.new("RGB", (width, height))
+              image.putdata(pixels)
+              filename = f"{round_data['id']}.png"
+              image.save(fixture_dir / filename, optimize=True)
+              round_data["review_image"] = f"work/fixture-images/{filename}"
+
+          Path("work/rounds.json").write_text(json.dumps(payload), encoding="utf-8")
+          PY
           else
             read -r -a category_array <<< "$CATEGORIES"
             python scripts/build_pack.py \
