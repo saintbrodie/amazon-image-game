@@ -1,0 +1,49 @@
+name: Fix screening email punctuation
+
+on:
+  push:
+    branches: [build/safety-screening]
+    paths:
+      - ".github/workflows/fix-screen-email.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: build/safety-screening
+      - name: Fix sentence-ending email detection
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/screen_dataset.py")
+          text = path.read_text(encoding="utf-8")
+          old = r'EMAIL_RE = re.compile(r"(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w.-])", re.I)'
+          new = r'EMAIL_RE = re.compile(r"(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w-])", re.I)'
+          if old not in text:
+              raise SystemExit("Expected EMAIL_RE source not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          test_path = Path("tests/test_screen_dataset.py")
+          tests = test_path.read_text(encoding="utf-8")
+          needle = '        self.assertTrue(all(flag["severity"] == "high" for flag in flags))\n'
+          addition = needle + '\n        sentence_flags = text_flags(make_round("sentence", "Contact me at person@example.com."))\n        self.assertIn("contact_email", {flag["name"] for flag in sentence_flags})\n'
+          if needle not in tests:
+              raise SystemExit("Expected test insertion point not found")
+          test_path.write_text(tests.replace(needle, addition, 1), encoding="utf-8")
+          PY
+          python -m unittest tests.test_screen_dataset -v
+          git diff --check
+      - name: Commit fix and remove one-shot workflow
+        run: |
+          rm .github/workflows/fix-screen-email.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add scripts/screen_dataset.py tests/test_screen_dataset.py .github/workflows/fix-screen-email.yml
+          git commit -m "Fix sentence-ending email screening"
+          git push origin HEAD:build/safety-screening
