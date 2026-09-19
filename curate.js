@@ -9,9 +9,11 @@ const state = {
   originalOrder: new Map(),
   datasetSignature: "",
   decisions: {},
+  bulkUndo: null,
   category: "all",
   status: "undecided",
   screening: "all",
+  signal: "all",
   sort: "priority",
   filtered: [],
   index: 0,
@@ -48,6 +50,7 @@ const els = {
   categorySelect: document.querySelector("#categorySelect"),
   statusSelect: document.querySelector("#statusSelect"),
   screeningSelect: document.querySelector("#screeningSelect"),
+  signalSelect: document.querySelector("#signalSelect"),
   sortSelect: document.querySelector("#sortSelect"),
   reviewedStat: document.querySelector("#reviewedStat"),
   keptStat: document.querySelector("#keptStat"),
@@ -58,6 +61,14 @@ const els = {
   importButton: document.querySelector("#importButton"),
   importInput: document.querySelector("#importInput"),
   resetButton: document.querySelector("#resetButton"),
+  bulkPriorityInput: document.querySelector("#bulkPriorityInput"),
+  keepClearButton: document.querySelector("#keepClearButton"),
+  keepClearLabel: document.querySelector("#keepClearLabel"),
+  keepClearCount: document.querySelector("#keepClearCount"),
+  rejectHighButton: document.querySelector("#rejectHighButton"),
+  rejectHighCount: document.querySelector("#rejectHighCount"),
+  undoBulkButton: document.querySelector("#undoBulkButton"),
+  bulkStatus: document.querySelector("#bulkStatus"),
   datasetNote: document.querySelector("#datasetNote"),
 };
 
@@ -111,12 +122,25 @@ function saveDecisions() {
   }));
 }
 
+function clearBulkUndo() {
+  state.bulkUndo = null;
+  els.undoBulkButton.disabled = true;
+}
+
 function populateCategories() {
   const categories = [...new Set(state.rounds.map(categoryKey))]
     .sort((a, b) => humanizeCategory(a).localeCompare(humanizeCategory(b)));
   const options = [new Option("All categories", "all")];
   categories.forEach((category) => options.push(new Option(humanizeCategory(category), category)));
   els.categorySelect.replaceChildren(...options);
+}
+
+function populateSignals() {
+  const options = [new Option("All signals", "all")];
+  CuratorActions.signalNames(state.rounds).forEach((signal) => {
+    options.push(new Option(humanizeFlag(signal), signal));
+  });
+  els.signalSelect.replaceChildren(...options);
 }
 
 function matchesStatus(round) {
@@ -156,7 +180,8 @@ function rebuildFilter({ preserveRoundId = null } = {}) {
   state.filtered = state.rounds.filter((round) => {
     const categoryMatch = state.category === "all" || categoryKey(round) === state.category;
     const screeningMatch = CuratorScreening.matches(round, state.screening);
-    return categoryMatch && matchesStatus(round) && screeningMatch;
+    const signalMatch = CuratorActions.matchesSignal(round, state.signal);
+    return categoryMatch && matchesStatus(round) && screeningMatch && signalMatch;
   });
   state.filtered.sort(compareRounds);
 
@@ -192,6 +217,30 @@ function renderChoiceList(round) {
   els.choiceList.replaceChildren(...items);
 }
 
+function bulkPriorityValue() {
+  const value = Math.round(Number(els.bulkPriorityInput.value));
+  const normalized = Number.isFinite(value) ? Math.max(0, Math.min(100, value)) : 20;
+  if (String(normalized) !== els.bulkPriorityInput.value) els.bulkPriorityInput.value = String(normalized);
+  return normalized;
+}
+
+function renderBulkStats() {
+  const maxPriority = bulkPriorityValue();
+  const keepCandidates = CuratorActions.bulkCandidates(
+    state.rounds,
+    state.decisions,
+    "keep-clear",
+    { maxPriority },
+  );
+  const rejectCandidates = CuratorActions.bulkCandidates(state.rounds, state.decisions, "reject-high");
+  els.keepClearLabel.textContent = `Keep clear ≤${maxPriority}`;
+  els.keepClearCount.textContent = keepCandidates.length.toLocaleString();
+  els.rejectHighCount.textContent = rejectCandidates.length.toLocaleString();
+  els.keepClearButton.disabled = keepCandidates.length === 0;
+  els.rejectHighButton.disabled = rejectCandidates.length === 0;
+  els.undoBulkButton.disabled = !state.bulkUndo;
+}
+
 function renderStats() {
   const values = Object.values(state.decisions);
   const kept = values.filter((value) => value === "keep").length;
@@ -203,6 +252,7 @@ function renderStats() {
   els.remainingStat.textContent = Math.max(0, state.rounds.length - reviewed).toLocaleString();
   const flagged = state.rounds.filter((round) => CuratorScreening.needsReview(round)).length;
   els.flaggedStat.textContent = flagged.toLocaleString();
+  renderBulkStats();
 }
 
 function renderDecision(round) {
@@ -340,6 +390,8 @@ function advance(direction = 1) {
 function decide(value) {
   const round = currentRound();
   if (!round) return;
+  clearBulkUndo();
+  els.bulkStatus.textContent = "";
   state.decisions[round.id] = value;
   saveDecisions();
   renderStats();
@@ -352,6 +404,34 @@ function decide(value) {
     renderDecision(round);
     advance(1);
   }
+}
+
+function runBulk(action, value) {
+  const maxPriority = bulkPriorityValue();
+  const candidates = CuratorActions.bulkCandidates(state.rounds, state.decisions, action, { maxPriority });
+  if (!candidates.length) return;
+
+  const description = action === "reject-high"
+    ? `reject ${candidates.length.toLocaleString()} undecided high-risk rounds`
+    : `keep ${candidates.length.toLocaleString()} undecided clear rounds with curation priority ≤ ${maxPriority}`;
+  if (!window.confirm(`Bulk ${description}? Existing manual decisions will not be changed.`)) return;
+
+  const applied = CuratorActions.applyBulk(state.decisions, candidates, value);
+  state.decisions = applied.next;
+  state.bulkUndo = { previous: applied.previous, description };
+  saveDecisions();
+  els.bulkStatus.textContent = `Bulk action applied: ${description}.`;
+  rebuildFilter({ preserveRoundId: currentRound()?.id || null });
+}
+
+function undoBulk() {
+  if (!state.bulkUndo) return;
+  const description = state.bulkUndo.description;
+  state.decisions = CuratorActions.restoreBulk(state.decisions, state.bulkUndo.previous);
+  state.bulkUndo = null;
+  saveDecisions();
+  els.bulkStatus.textContent = `Undid bulk action: ${description}.`;
+  rebuildFilter({ preserveRoundId: currentRound()?.id || null });
 }
 
 function decisionExportPayload() {
@@ -398,6 +478,8 @@ async function importDecisions(file) {
     if (!proceed) return;
   }
 
+  clearBulkUndo();
+  els.bulkStatus.textContent = "";
   const validIds = new Set(state.rounds.map((round) => round.id));
   payload.kept_ids.forEach((id) => { if (validIds.has(id)) state.decisions[id] = "keep"; });
   payload.rejected_ids.forEach((id) => { if (validIds.has(id)) state.decisions[id] = "reject"; });
@@ -408,6 +490,8 @@ async function importDecisions(file) {
 function resetDecisions() {
   if (!window.confirm("Clear all local curation decisions for this dataset?")) return;
   state.decisions = {};
+  clearBulkUndo();
+  els.bulkStatus.textContent = "All local decisions cleared.";
   saveDecisions();
   rebuildFilter();
 }
@@ -446,11 +530,20 @@ function bindEvents() {
     state.index = 0;
     rebuildFilter();
   });
+  els.signalSelect.addEventListener("change", () => {
+    state.signal = els.signalSelect.value;
+    state.index = 0;
+    rebuildFilter();
+  });
   els.sortSelect.addEventListener("change", () => {
     const currentId = currentRound()?.id || null;
     state.sort = els.sortSelect.value;
     rebuildFilter({ preserveRoundId: currentId });
   });
+  els.bulkPriorityInput.addEventListener("input", renderBulkStats);
+  els.keepClearButton.addEventListener("click", () => runBulk("keep-clear", "keep"));
+  els.rejectHighButton.addEventListener("click", () => runBulk("reject-high", "reject"));
+  els.undoBulkButton.addEventListener("click", undoBulk);
   els.reviewImage.addEventListener("error", () => {
     els.reviewImage.hidden = true;
     els.imageFallback.hidden = false;
@@ -483,6 +576,7 @@ async function init() {
     state.datasetSignature = loader.signature || datasetSignature(state.rounds);
     state.decisions = loadStoredDecisions();
     populateCategories();
+    populateSignals();
     const scored = state.rounds.filter((round) => round.analysis && typeof round.analysis === "object").length;
     const screened = state.rounds.filter((round) => CuratorScreening.screening(round)).length;
     const flagged = state.rounds.filter((round) => CuratorScreening.needsReview(round)).length;
