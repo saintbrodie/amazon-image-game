@@ -7,6 +7,7 @@
   <title>Round Curator | What Did They Buy?</title>
   <link rel="stylesheet" href="curate.css">
   <link rel="stylesheet" href="curate-quality.css">
+  <link rel="stylesheet" href="curate-screening.css">
 </head>
 <body>
   <div class="shell">
@@ -28,6 +29,7 @@
       <div><span>Kept</span><strong id="keptStat">0</strong></div>
       <div><span>Rejected</span><strong id="rejectedStat">0</strong></div>
       <div><span>Remaining</span><strong id="remainingStat">0</strong></div>
+      <div><span>Screening flags</span><strong id="flaggedStat">0</strong></div>
     </section>
 
     <section class="toolbar">
@@ -45,9 +47,20 @@
         </select>
       </label>
       <label>
+        <span>Screening</span>
+        <select id="screeningSelect">
+          <option value="all">All screening</option>
+          <option value="review">Needs review</option>
+          <option value="high">High risk</option>
+          <option value="clear">Clear</option>
+          <option value="unscreened">Not screened</option>
+        </select>
+      </label>
+      <label>
         <span>Sort</span>
         <select id="sortSelect">
           <option value="priority" selected>Needs review first</option>
+          <option value="screening">Screening risk first</option>
           <option value="hardest">Hardest first</option>
           <option value="easiest">Easiest first</option>
           <option value="dataset">Dataset order</option>
@@ -77,6 +90,18 @@
           <p class="eyebrow" id="sourceCategory"></p>
           <h2 id="productTitle"></h2>
           <p class="productMeta" id="productMeta"></p>
+
+          <div class="screening-box" id="screeningBox">
+            <div>
+              <span>Screening risk</span>
+              <strong id="screeningRisk">Not screened</strong>
+            </div>
+            <div>
+              <span>Status</span>
+              <strong id="screeningStatus">Not screened</strong>
+            </div>
+            <ul id="screeningFlags"></ul>
+          </div>
 
           <div class="quality-box" id="qualityBox">
             <div>
@@ -114,13 +139,14 @@
 
     <section class="empty-state" id="emptyState" hidden>
       <h2>Nothing matches this filter.</h2>
-      <p>Change the category/status filter, or export your decisions if you are done.</p>
+      <p>Change the category/status/screening filter, or export your decisions if you are done.</p>
     </section>
 
     <p class="dataset-note" id="datasetNote"></p>
   </div>
 
   <script src="game-core.js"></script>
+  <script src="curate-screening.js"></script>
   <script src="curate.js" defer></script>
 </body>
 </html>
