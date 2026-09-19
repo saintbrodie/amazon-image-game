@@ -38,6 +38,20 @@ async function waitForRevision(page, revision) {
   );
 }
 
+async function clickNextAndWait(page) {
+  const previous = await page.locator("#roundId").textContent();
+  await page.click("#nextButton");
+  await page.waitForFunction(
+    (oldId) => {
+      const current = document.querySelector("#roundId")?.textContent;
+      return Boolean(current && current !== oldId);
+    },
+    previous,
+    { timeout: 15000 },
+  );
+  return page.locator("#roundId").textContent();
+}
+
 async function resolveVisibleConflict(page, selector) {
   await page.waitForSelector("#sharedConflictBox:not([hidden])", { timeout: 15000 });
   page.once("dialog", (dialog) => dialog.accept());
@@ -62,8 +76,7 @@ async function resolveVisibleConflict(page, selector) {
     await alice.click("#keepButton");
     await waitForRevision(alice, 1);
 
-    await bob.click("#nextButton");
-    const secondId = await bob.locator("#roundId").textContent();
+    const secondId = await clickNextAndWait(bob);
     assert.notStrictEqual(secondId, firstId);
     await bob.click("#rejectButton");
     await waitForRevision(bob, 2);
