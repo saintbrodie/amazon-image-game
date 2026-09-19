@@ -1,0 +1,134 @@
+.shared-workspace {
+  display: grid;
+  gap: 0.85rem;
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border, #303030);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.shared-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.shared-heading strong {
+  font-size: 0.98rem;
+}
+
+.shared-heading p,
+.shared-message,
+.shared-activity {
+  margin: 0;
+  color: var(--muted, #a9a9a9);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.shared-fields {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.7fr) minmax(220px, 1.4fr) minmax(150px, 0.9fr) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+
+.shared-fields label,
+.shared-auto {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  color: var(--muted, #aaa);
+}
+
+.shared-fields input[type="text"],
+.shared-fields input[type="password"] {
+  width: 100%;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border, #3a3a3a);
+  border-radius: 8px;
+  background: var(--surface, #181818);
+  color: inherit;
+}
+
+.shared-auto {
+  grid-auto-flow: column;
+  justify-content: start;
+  align-items: center;
+  align-self: center;
+  gap: 0.45rem;
+  white-space: nowrap;
+}
+
+.shared-actions,
+.shared-conflict-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.shared-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid var(--border, #3a3a3a);
+  color: var(--muted, #aaa);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.shared-status.connected {
+  border-color: #2f7852;
+  color: #8fd6ad;
+}
+
+.shared-status.syncing,
+.shared-status.dirty {
+  border-color: #806b2d;
+  color: #e1c76f;
+}
+
+.shared-status.conflict,
+.shared-status.error {
+  border-color: #8b3e3e;
+  color: #f0a0a0;
+}
+
+.shared-conflict {
+  padding: 0.75rem;
+  border: 1px solid #8b3e3e;
+  border-radius: 9px;
+  background: rgba(139, 62, 62, 0.1);
+}
+
+.shared-conflict p {
+  margin: 0 0 0.65rem;
+}
+
+.shared-activity {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 900px) {
+  .shared-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .shared-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .shared-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
