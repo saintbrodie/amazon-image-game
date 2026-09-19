@@ -92,18 +92,22 @@ on:
       - "scripts/cache_images.py"
       - "scripts/image_safety.py"
       - "scripts/screen_dataset.py"
+      - "scripts/shared_workspace_server.py"
       - "scripts/shard_dataset.py"
       - "scripts/validate_shards.py"
       - "dataset-loader.js"
+      - "workspace-sync.js"
       - "app.js"
       - "index.html"
       - "curate.html"
       - "curate.js"
       - "curate-actions.js"
       - "curate-screening.js"
+      - "curate-shared.js"
       - "curate.css"
       - "curate-quality.css"
       - "curate-screening.css"
+      - "curate-shared.css"
 
 concurrency:
   group: deployment-${{ github.workflow }}-${{ github.ref }}
@@ -336,7 +340,10 @@ jobs:
         run: |
           set -euo pipefail
           cp index.html styles.css controls.css daily.css game-core.js dataset-loader.js app.js \
-            curate.html curate.js curate-actions.js curate-screening.js curate.css curate-quality.css curate-screening.css site/
+            curate.html curate.js curate-actions.js curate-screening.js workspace-sync.js curate-shared.js \
+            curate.css curate-quality.css curate-screening.css curate-shared.css site/
+          mkdir -p site/tools
+          cp scripts/shared_workspace_server.py site/tools/shared_workspace_server.py
           cat > site/CONTENT_RIGHTS_NOTICE.txt <<'EOF'
           This artifact may contain third-party customer review media from the
           McAuley Lab Amazon Reviews 2023 dataset. Dataset availability is not
@@ -377,7 +384,11 @@ jobs:
             sleep 0.25
           done
           curl -fsS http://127.0.0.1:8765/data/rounds.manifest.json > /tmp/manifest.json
-          curl -fsS http://127.0.0.1:8765/curate.html | grep -q "Round Curator"
+          curl -fsS http://127.0.0.1:8765/curate.html | grep -q "Shared workspace"
+          test -s site/workspace-sync.js
+          test -s site/curate-shared.js
+          test -s site/curate-shared.css
+          test -s site/tools/shared_workspace_server.py
           shard_path=$(python - <<'PY'
           import json
           print(json.load(open('/tmp/manifest.json'))['shards'][0]['path'])
