@@ -16,11 +16,15 @@ The repository includes an original bundled demo plus streaming tools for the [M
 - Lazy sharded curation for large packs
 - Screening-aware curator filters, signal queues, sorting, and risk badges
 - Reversible conservative bulk curation actions
+- Per-round private curator notes and tags with tag-based queues
+- Saved curator queue presets
+- Portable curator workspace export/import separated from compact deployment decisions
 - Heuristic difficulty and curation-priority scoring
 - Conservative privacy/review-media screening helpers
 - Dataset audit reports
 - Optional local review-image caching
 - Exact and optional perceptual image deduplication
+- Safe dry-run-first image-cache pruning and reclaimable-space reporting
 - Streaming Amazon Reviews 2023 ingestion with bounded memory
 - Pack-level distractor reranking for more plausible wrong answers
 - Deterministic static sharding with lazy browser loading
@@ -198,6 +202,9 @@ The curator supports:
 - category and decision filters
 - screening filters for flagged, high-risk, clear, or unscreened rounds
 - signal queues such as faces, QR codes, social handles, or other emitted screening flags
+- per-round private tags and operator notes
+- tag-based review queues
+- saved queue presets for category/status/screening/signal/tag/sort/auto-keep threshold
 - sorting by curation priority, screening risk, or difficulty
 - visible screening severity badges and risk score
 - lazy loading from sharded packs without downloading every round
@@ -206,10 +213,12 @@ The curator supports:
 - one-step undo for the most recent bulk action
 - existing manual decisions are never overwritten by a bulk action
 - review/product/choice inspection
-- portable JSON decision export/import
-- **Copy Actions JSON** for a compact payload ready to paste into the deployment workflow
+- version 2 workspace JSON export/import with decisions, notes, tags, and presets
+- **Copy Actions JSON** for a compact deployment payload containing only dataset signature and keep/reject IDs
 
-Apply exported decisions offline:
+Operator notes, tags, and presets stay in the curator workspace and are not copied into public game shards or the compact deployment payload. See [`docs/curator-workspace.md`](docs/curator-workspace.md) for the workspace model and portability details.
+
+Apply exported deployment decisions offline:
 
 ```bash
 python scripts/apply_curation.py \
@@ -243,6 +252,18 @@ python scripts/cache_images.py data/rounds.curated.json \
 ```
 
 The perceptual mode uses a 64-bit dHash and Hamming distance. `4` is a conservative starting point.
+
+### Prune an accumulated image cache
+
+Repeated builds can leave unreferenced content-addressed files behind. Preview reclaimable space first:
+
+```bash
+python scripts/prune_image_cache.py \
+  --cache-dir assets/review-cache \
+  data/rounds.cached.json
+```
+
+The pruner is dry-run by default and can union references from multiple full packs or sharded manifests. Add `--delete` only after reviewing the orphan report. See [`docs/cache-maintenance.md`](docs/cache-maintenance.md).
 
 ## Static sharding
 
@@ -322,6 +343,7 @@ node tests/test_game_core.js
 node tests/test_dataset_loader.js
 node tests/test_curate_screening.js
 node tests/test_curate_actions.js
+node tests/test_curate_state.js
 python -m compileall -q scripts tests
 python scripts/validate_dataset.py data/demo.json
 python -m unittest discover -s tests -p 'test_*.py' -v
@@ -339,7 +361,6 @@ This project is not affiliated with or endorsed by Amazon. The bundled demo artw
 
 ## Next technical milestones
 
-- Better image-cache pruning/reporting across repeated cache runs
 - Optional object-storage publishing for large rotating pools
 - Stronger optional image-safety model integration while keeping human review in the loop
-- Curator productivity features such as notes/tags and saved queue presets
+- Shared/multi-curator workspace support if curation moves beyond a single operator/browser
