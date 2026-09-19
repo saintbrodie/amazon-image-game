@@ -4,8 +4,8 @@
 The manifest keeps only the lightweight information needed to choose and
 curate rounds: round ID, source category, shard ID, plus optional score and
 screening summaries. Full review text, image URLs, product metadata, choices,
-and screening detail remain in shard files. A static browser can therefore
-filter/select rounds first and fetch only the shard files it actually needs.
+and detailed screening metadata remain in shard files. A static browser can
+therefore filter/select rounds first and fetch only the shard files it needs.
 """
 
 from __future__ import annotations
@@ -80,6 +80,24 @@ def _finite_number(value: Any) -> int | float | None:
     return value
 
 
+def _compact_screening_flags(value: Any) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    compact: dict[tuple[str, str], dict[str, str]] = {}
+    for flag in value:
+        if not isinstance(flag, dict):
+            continue
+        name = flag.get("name")
+        if not isinstance(name, str) or not name.strip():
+            continue
+        item = {"name": name.strip()}
+        severity = flag.get("severity")
+        if severity in {"low", "medium", "high"}:
+            item["severity"] = severity
+        compact[(item["name"], item.get("severity", ""))] = item
+    return [compact[key] for key in sorted(compact)]
+
+
 def manifest_index_entry(round_data: dict[str, Any], shard_id: str) -> dict[str, Any]:
     """Return the intentionally small manifest entry used by game/curator UIs."""
     entry: dict[str, Any] = {
@@ -120,6 +138,9 @@ def manifest_index_entry(round_data: dict[str, Any], shard_id: str) -> dict[str,
             }
             if compact_counts:
                 screening_summary["severity_counts"] = compact_counts
+        compact_flags = _compact_screening_flags(screening.get("flags"))
+        if compact_flags:
+            screening_summary["flags"] = compact_flags
         if screening_summary:
             entry["screening"] = screening_summary
 
