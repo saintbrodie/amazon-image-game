@@ -64,6 +64,50 @@
     return `${sourceDirectory(manifestSource)}${path}`;
   }
 
+  function normalizeReviewImageDelivery(value) {
+    if (!value || typeof value !== "object") return null;
+    const rawPrefix = cleanText(value.path_prefix);
+    const rawBase = cleanText(value.base_url);
+    if (!rawPrefix || !rawBase || rawPrefix.startsWith("/") || rawPrefix.includes("\\")) return null;
+    const prefixParts = rawPrefix.split("/").filter(Boolean);
+    if (!prefixParts.length || prefixParts.some((part) => part === "." || part === "..")) return null;
+    let parsed;
+    try {
+      parsed = new URL(rawBase);
+    } catch {
+      return null;
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    parsed.search = "";
+    parsed.hash = "";
+    const pathPrefix = `${prefixParts.join("/")}/`;
+    const baseUrl = `${parsed.toString().replace(/\/+$/, "")}/`;
+    return { path_prefix: pathPrefix, base_url: baseUrl };
+  }
+
+  function resolveReviewImage(reviewImage, delivery) {
+    const path = cleanText(reviewImage);
+    if (!path || !delivery) return reviewImage;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(path) || path.startsWith("//")) return path;
+    if (!path.startsWith(delivery.path_prefix)) return path;
+    const suffix = path.slice(delivery.path_prefix.length);
+    if (!suffix || suffix.startsWith("/") || suffix.includes("\\")) return path;
+    const parts = suffix.split("/");
+    if (parts.some((part) => !part || part === "." || part === "..")) return path;
+    try {
+      return new URL(suffix, delivery.base_url).toString();
+    } catch {
+      return path;
+    }
+  }
+
+  function applyReviewImageDelivery(round, delivery) {
+    if (!round || typeof round !== "object" || !delivery) return round;
+    const resolved = resolveReviewImage(round.review_image, delivery);
+    if (resolved === round.review_image) return round;
+    return { ...round, review_image: resolved };
+  }
+
   function uniqueCategoriesFromIndex(index) {
     return [...new Set(index.map((row) => cleanText(row.category, "Other")))]
       .sort((left, right) => left.localeCompare(right));
@@ -155,6 +199,7 @@
       this.source = source;
       this.payload = normalizeInlinePayload(payload);
       this.metadata = this.payload;
+      this.reviewImageDelivery = normalizeReviewImageDelivery(this.payload.asset_delivery?.review_images);
       this.roundMap = new Map(this.payload.rounds.map((round) => [String(round.id), round]));
       this.index = this.payload.rounds.map((round) => indexEntry(round, null));
       this.roundCount = this.index.length;
@@ -169,7 +214,7 @@
       return entries.map((entry) => {
         const round = this.roundMap.get(String(entry.id));
         if (!round) throw new Error(`Round ${entry.id} is missing from inline dataset.`);
-        return round;
+        return applyReviewImageDelivery(round, this.reviewImageDelivery);
       });
     }
   }
@@ -185,6 +230,7 @@
       this.index = manifest.index.map((row) => indexEntry(row, String(row.shard)));
       this.roundCount = Number(manifest.round_count) || this.index.length;
       this.signature = String(manifest.dataset_signature);
+      this.reviewImageDelivery = normalizeReviewImageDelivery(manifest.asset_delivery?.review_images);
       this.shards = new Map(manifest.shards.map((row) => [String(row.id), row]));
       this.shardCache = new Map();
     }
@@ -212,7 +258,10 @@
         if (String(payload.shard?.id || "") !== key) {
           throw new Error(`Embedded shard ID mismatch in shard ${key}.`);
         }
-        return new Map(payload.rounds.map((round) => [String(round.id), round]));
+        return new Map(payload.rounds.map((round) => {
+          const delivered = applyReviewImageDelivery(round, this.reviewImageDelivery);
+          return [String(delivered.id), delivered];
+        }));
       }).catch((error) => {
         this.shardCache.delete(key);
         throw error;
@@ -267,14 +316,17 @@
   return {
     InlineDataSource,
     ShardedDataSource,
+    applyReviewImageDelivery,
     compactAnalysis,
     compactScreening,
     compactScreeningFlags,
     indexEntry,
     manifestLooksValid,
     normalizeInlinePayload,
+    normalizeReviewImageDelivery,
     open,
     resolveRelativeSource,
+    resolveReviewImage,
     roundCategory,
   };
 });
