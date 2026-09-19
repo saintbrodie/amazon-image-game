@@ -25,6 +25,8 @@ The repository includes an original bundled demo plus streaming tools for the [M
 - Optional local review-image caching
 - Exact and optional perceptual image deduplication
 - Safe dry-run-first image-cache pruning and reclaimable-space reporting
+- S3-compatible publishing for large cached review-image pools
+- Manifest-level CDN/object-storage delivery mapping without shard rewrites
 - Streaming Amazon Reviews 2023 ingestion with bounded memory
 - Pack-level distractor reranking for more plausible wrong answers
 - Deterministic static sharding with lazy browser loading
@@ -265,6 +267,33 @@ python scripts/prune_image_cache.py \
 
 The pruner is dry-run by default and can union references from multiple full packs or sharded manifests. Add `--delete` only after reviewing the orphan report. See [`docs/cache-maintenance.md`](docs/cache-maintenance.md).
 
+## Publish review images to object storage
+
+Large rotating pools can keep the app/shard site small by moving only cached review images to S3-compatible object storage.
+
+Dry-run the upload plan first:
+
+```bash
+python scripts/publish_assets.py site \
+  --bucket my-game-assets \
+  --object-prefix review-cache \
+  --public-base-url https://images.example.com/reviews/ \
+  --report reports/publish-plan.json
+```
+
+Install the optional publishing dependency and add `--apply` when the plan is correct:
+
+```bash
+python -m pip install -r requirements-publishing.txt
+python scripts/publish_assets.py site \
+  --bucket my-game-assets \
+  --object-prefix review-cache \
+  --public-base-url https://images.example.com/reviews/ \
+  --apply
+```
+
+The publisher uploads content-addressed images with immutable cache headers and then adds an `asset_delivery.review_images` mapping to `data/rounds.manifest.json`. Shard JSON is not rewritten. Changing buckets or CDN domains later only requires changing the manifest mapping. AWS S3 and S3-compatible providers such as Cloudflare R2, MinIO, Wasabi, and Backblaze B2 S3 are supported through boto3 endpoint configuration. See [`docs/object-storage.md`](docs/object-storage.md).
+
 ## Static sharding
 
 Large packs can be split into deterministic static shards:
@@ -361,6 +390,5 @@ This project is not affiliated with or endorsed by Amazon. The bundled demo artw
 
 ## Next technical milestones
 
-- Optional object-storage publishing for large rotating pools
 - Stronger optional image-safety model integration while keeping human review in the loop
 - Shared/multi-curator workspace support if curation moves beyond a single operator/browser
