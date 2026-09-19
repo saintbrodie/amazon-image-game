@@ -135,9 +135,11 @@ async function resolveVisibleConflict(page, selector) {
 
     remote = await serverWorkspace();
     assert.strictEqual(remote.workspace.decisions[conflictTwoIdAlice], winnerValue);
-    assert.strictEqual(remote.revision, 6);
-    await waitForRevision(secondWinnerPage, 6);
-    await waitForRevision(secondConflictPage, 6);
+    // Choosing the already-shared value is intentionally a no-op. The server
+    // resolves the conflict without manufacturing an extra history revision.
+    assert.strictEqual(remote.revision, 5);
+    await waitForRevision(secondWinnerPage, 5);
+    await waitForRevision(secondConflictPage, 5);
 
     const history = await fetch(`${BASE_URL}/api/workspaces/${encodeURIComponent(signature)}/history`).then((r) => r.json());
     assert.ok(history.history.some((row) => row.updated_by === "Alice"));
