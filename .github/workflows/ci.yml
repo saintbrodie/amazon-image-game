@@ -36,6 +36,7 @@ jobs:
           node tests/test_dataset_loader.js
           node tests/test_curate_screening.js
           node tests/test_curate_actions.js
+          node tests/test_curate_state.js
       - name: Check Python syntax
         run: python -m compileall -q scripts tests
       - name: Validate bundled game data
