@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from apply_curation import apply_curation, dataset_signature  # noqa: E402
+from apply_curation import apply_curation, dataset_signature, game_core_hash  # noqa: E402
 
 
 def sample_dataset():
@@ -28,6 +28,11 @@ class ApplyCurationTests(unittest.TestCase):
         backward = dataset_signature(list(reversed(dataset["rounds"])))
         self.assertEqual(forward, backward)
         self.assertRegex(forward, r"^[0-9a-f]+$")
+
+    def test_hash_matches_browser_utf16_semantics(self):
+        self.assertEqual(game_core_hash("hello"), 0x4F9F2CAB)
+        unicode_rounds = [{"id": "round-🐈"}, {"id": "café"}]
+        self.assertEqual(dataset_signature(unicode_rounds), "86678b2f")
 
     def test_default_removes_rejected_and_preserves_unreviewed(self):
         dataset = sample_dataset()
