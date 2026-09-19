@@ -25,7 +25,6 @@ async function workspace(page) {
   try {
     const context = await browser.newContext();
     const page = await context.newPage();
-    await page.addInitScript(() => localStorage.clear());
     await page.goto(`${BASE_URL}/curate.html`, { waitUntil: "domcontentloaded" });
     await waitForCurator(page);
 
