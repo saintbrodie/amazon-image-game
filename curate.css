@@ -24,7 +24,7 @@ button:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid
 .button { min-height: 40px; padding: 9px 14px; border: 1px solid #c66f18; border-radius: 10px; background: var(--orange); color: #25180c; cursor: pointer; font-weight: 850; }
 .button.secondary { border-color: var(--line); background: var(--panel); color: var(--ink); }
 .button.danger-quiet { border-color: transparent; background: transparent; color: var(--red); }
-.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+.stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
 .stats div { padding: 14px 16px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,253,249,.75); }
 .stats span, .stats strong { display: block; }
 .stats span { color: var(--muted); font-size: 10px; font-weight: 900; letter-spacing: .09em; text-transform: uppercase; }
