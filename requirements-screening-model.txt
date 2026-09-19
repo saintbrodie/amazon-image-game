@@ -1,0 +1,5 @@
+# Optional heavyweight dependencies for local transformer image-safety screening.
+# Normal CI and default deployment builds do not install this file.
+-r requirements-screening.txt
+transformers>=4.48,<6
+torch>=2.2
