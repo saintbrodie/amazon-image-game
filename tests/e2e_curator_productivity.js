@@ -61,7 +61,7 @@ async function workspace(page) {
       await dialog.accept("Funny queue");
     });
     await page.click("#savePresetButton");
-    await page.waitForSelector('#presetSelect option[value="funny queue"]');
+    await page.waitForSelector('#presetSelect option[value="funny queue"]', { state: "attached" });
 
     let stored = await workspace(page);
     assert.strictEqual(stored.presets.length, 1);
