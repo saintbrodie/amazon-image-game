@@ -13,7 +13,9 @@ The repository includes an original bundled demo plus streaming tools for the [M
 - Deterministic five-round daily challenge with shareable results
 - Broken-image skip handling
 - Browser-based keep/reject curator
-- Screening-aware curator filters, sorting, and risk badges
+- Lazy sharded curation for large packs
+- Screening-aware curator filters, signal queues, sorting, and risk badges
+- Reversible conservative bulk curation actions
 - Heuristic difficulty and curation-priority scoring
 - Conservative privacy/review-media screening helpers
 - Dataset audit reports
@@ -23,7 +25,8 @@ The repository includes an original bundled demo plus streaming tools for the [M
 - Pack-level distractor reranking for more plausible wrong answers
 - Deterministic static sharding with lazy browser loading
 - Manual GitHub Actions workflow that produces a ready-to-host static-site artifact
-- Chromium end-to-end tests for the sharded browser path
+- Optional curator-decision application during deployment builds
+- Chromium end-to-end tests for the sharded game and curator paths
 - Mobile-friendly, framework-free UI
 
 ## Run the game
@@ -194,10 +197,17 @@ The curator supports:
 - left/right arrows to navigate
 - category and decision filters
 - screening filters for flagged, high-risk, clear, or unscreened rounds
+- signal queues such as faces, QR codes, social handles, or other emitted screening flags
 - sorting by curation priority, screening risk, or difficulty
 - visible screening severity badges and risk score
+- lazy loading from sharded packs without downloading every round
+- bulk reject for undecided high-risk rounds
+- conservative bulk keep for screened-clear rounds below a configurable curation-priority ceiling
+- one-step undo for the most recent bulk action
+- existing manual decisions are never overwritten by a bulk action
 - review/product/choice inspection
 - portable JSON decision export/import
+- **Copy Actions JSON** for a compact payload ready to paste into the deployment workflow
 
 Apply exported decisions offline:
 
@@ -208,7 +218,7 @@ python scripts/apply_curation.py \
   --output data/rounds.curated.json
 ```
 
-By default only explicit rejects are removed. Add `--only-kept` for a strict hand-picked pack. Dataset-signature mismatches fail unless intentionally overridden.
+By default only explicit rejects are removed. Add `--only-kept` for a strict hand-picked pack. Dataset-signature mismatches fail unless intentionally overridden. Signature calculation matches the browser's UTF-16 FNV behavior, including Unicode round IDs.
 
 ## Cache review images locally
 
@@ -247,13 +257,23 @@ python scripts/shard_dataset.py data/rounds.screened.json \
 python scripts/validate_shards.py data/rounds.manifest.json
 ```
 
-The browser reads the lightweight manifest first and fetches only the shards needed for the selected game. See [`docs/sharding.md`](docs/sharding.md).
+The browser and curator read the lightweight manifest first and fetch only the shards they need. Compact manifest entries include curation/difficulty scores and screening signal names/severity, while full review text, images, choices, product metadata, and detailed screening metadata stay in shard files. See [`docs/sharding.md`](docs/sharding.md).
 
 ## Build a deployable artifact in GitHub Actions
 
 The **Build deployment artifact** workflow can turn selected real Amazon Reviews 2023 categories into a ready-to-host static-site ZIP.
 
-It runs build, scoring, auditing, image caching, perceptual deduplication, screening, sharding, shard validation, and an HTTP smoke test before uploading the site and a separate reports artifact.
+It runs build, scoring, auditing, image caching, perceptual deduplication, screening, optional curator-decision application, sharding, shard validation, and an HTTP smoke test before uploading the site and a separate reports artifact.
+
+For a curated deployment:
+
+1. Review the same screened pack in `curate.html`.
+2. Click **Copy Actions JSON**.
+3. Open **Actions -> Build deployment artifact -> Run workflow**.
+4. Paste the compact JSON into `curation_json`.
+5. Leave `only_kept` off to remove explicit rejects while retaining unreviewed rounds, or enable it for a strict hand-picked deployment.
+
+The workflow validates the exported dataset signature before applying decisions. A mismatch fails the build instead of silently applying decisions to another generated pack.
 
 See [`docs/deployment.md`](docs/deployment.md) for the workflow inputs and artifact layout.
 
@@ -296,10 +316,12 @@ node --check game-core.js
 node --check dataset-loader.js
 node --check app.js
 node --check curate-screening.js
+node --check curate-actions.js
 node --check curate.js
 node tests/test_game_core.js
 node tests/test_dataset_loader.js
 node tests/test_curate_screening.js
+node tests/test_curate_actions.js
 python -m compileall -q scripts tests
 python scripts/validate_dataset.py data/demo.json
 python -m unittest discover -s tests -p 'test_*.py' -v
@@ -317,7 +339,7 @@ This project is not affiliated with or endorsed by Amazon. The bundled demo artw
 
 ## Next technical milestones
 
-- Curator support for very large sharded packs without reconstructing a full local JSON file
 - Better image-cache pruning/reporting across repeated cache runs
 - Optional object-storage publishing for large rotating pools
 - Stronger optional image-safety model integration while keeping human review in the loop
+- Curator productivity features such as notes/tags and saved queue presets

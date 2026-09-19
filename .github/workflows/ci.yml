@@ -28,12 +28,14 @@ jobs:
           node --check dataset-loader.js
           node --check app.js
           node --check curate-screening.js
+          node --check curate-actions.js
           node --check curate.js
       - name: Test browser game modules
         run: |
           node tests/test_game_core.js
           node tests/test_dataset_loader.js
           node tests/test_curate_screening.js
+          node tests/test_curate_actions.js
       - name: Check Python syntax
         run: python -m compileall -q scripts tests
       - name: Validate bundled game data

@@ -64,7 +64,7 @@ class ShardDatasetTests(unittest.TestCase):
         self.assertTrue(all(row["shard"] in shard_ids for row in manifest["index"]))
         self.assertEqual(manifest["categories"], {"Automotive": 3, "Beauty": 4})
 
-    def test_manifest_index_includes_only_compact_curator_summaries(self):
+    def test_manifest_index_includes_compact_curator_summaries(self):
         enriched = make_round(20, "Beauty")
         enriched["review_text"] = "This full review must stay in the shard, not the manifest."
         enriched["analysis"] = {
@@ -79,7 +79,9 @@ class ShardDatasetTests(unittest.TestCase):
             "high_risk": False,
             "severity_counts": {"low": 0, "medium": 1, "high": 0},
             "flags": [
+                {"name": "person_face_detected", "severity": "medium", "source": "image", "details": {"count": 1}},
                 {"name": "person_face_detected", "severity": "medium", "source": "image"},
+                {"name": "social_handle", "severity": "low", "source": "review_text"},
             ],
             "image": {"face_count": 1, "width": 1200, "height": 900},
         }
@@ -93,15 +95,19 @@ class ShardDatasetTests(unittest.TestCase):
                 "needs_review": True,
                 "high_risk": False,
                 "severity_counts": {"low": 0, "medium": 1, "high": 0},
+                "flags": [
+                    {"name": "person_face_detected", "severity": "medium"},
+                    {"name": "social_handle", "severity": "low"},
+                ],
             },
         )
         self.assertNotIn("review_text", entry)
         self.assertNotIn("product", entry)
         self.assertNotIn("choices", entry)
         self.assertNotIn("flags", entry["analysis"])
-        self.assertNotIn("flags", entry["screening"])
+        self.assertNotIn("source", entry["screening"]["flags"][0])
         self.assertIn("review_text", shards[0][1]["rounds"][0])
-        self.assertIn("flags", shards[0][1]["rounds"][0]["screening"])
+        self.assertIn("details", shards[0][1]["rounds"][0]["screening"]["flags"][0])
 
     def test_sharding_is_deterministic_across_input_order(self):
         forward, _ = shard_dataset(self.payload, shard_size=3)

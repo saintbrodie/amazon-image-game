@@ -11,19 +11,20 @@ from pathlib import Path
 from typing import Any
 
 
-def fnv1a_ascii(value: str) -> int:
-    """Match game-core.js hashString for ASCII round IDs/signature input."""
-    value_bytes = value.encode("ascii")
+def game_core_hash(value: str) -> int:
+    """Match GameCore.hashString's FNV-1a over JavaScript UTF-16 code units."""
     hash_value = 2166136261
-    for byte in value_bytes:
-        hash_value ^= byte
+    encoded = str(value).encode("utf-16-le", errors="surrogatepass")
+    for offset in range(0, len(encoded), 2):
+        code_unit = encoded[offset] | (encoded[offset + 1] << 8)
+        hash_value ^= code_unit
         hash_value = (hash_value * 16777619) & 0xFFFFFFFF
     return hash_value
 
 
 def dataset_signature(rounds: list[dict[str, Any]]) -> str:
     ids = sorted(str(round_data.get("id", "")) for round_data in rounds)
-    return format(fnv1a_ascii("|".join(ids)), "x")
+    return format(game_core_hash("|".join(ids)), "x")
 
 
 def load_json(path: Path) -> Any:

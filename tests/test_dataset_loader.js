@@ -67,7 +67,12 @@ function round(id, category = "Beauty") {
             needs_review: true,
             high_risk: false,
             severity_counts: { medium: 1 },
-            flags: [{ name: "should-not-survive" }],
+            flags: [
+              { name: "person_face_detected", severity: "medium", source: "drop-source" },
+              { name: "person_face_detected", severity: "medium" },
+              { name: "social_handle", severity: "low" },
+              { name: "", severity: "high" },
+            ],
           },
           ignored: "drop me",
         },
@@ -109,6 +114,10 @@ function round(id, category = "Beauty") {
         needs_review: true,
         high_risk: false,
         severity_counts: { medium: 1 },
+        flags: [
+          { name: "person_face_detected", severity: "medium" },
+          { name: "social_handle", severity: "low" },
+        ],
       },
     });
 
@@ -131,7 +140,10 @@ function round(id, category = "Beauty") {
       needs_review: true,
       high_risk: true,
       severity_counts: { high: 1 },
-      flags: [{ name: "contact_email", severity: "high" }],
+      flags: [
+        { name: "contact_email", severity: "high", source: "review_text" },
+        { name: "contact_email", severity: "high" },
+      ],
     };
     const demo = { version: 1, name: "Demo", rounds: [inlineRound] };
     const routes = {
@@ -148,6 +160,7 @@ function round(id, category = "Beauty") {
       needs_review: true,
       high_risk: true,
       severity_counts: { high: 1 },
+      flags: [{ name: "contact_email", severity: "high" }],
     });
     assert.deepStrictEqual((await loader.loadEntries(loader.index)).map((item) => item.id), ["demo-1"]);
   }
