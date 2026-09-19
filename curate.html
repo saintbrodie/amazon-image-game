@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="curate.css">
   <link rel="stylesheet" href="curate-quality.css">
   <link rel="stylesheet" href="curate-screening.css">
+  <link rel="stylesheet" href="curate-shared.css">
 </head>
 <body>
   <div class="shell">
@@ -88,6 +89,52 @@
       <button id="applyPresetButton" class="button secondary" type="button" disabled>Apply preset</button>
       <button id="savePresetButton" class="button secondary" type="button">Save current queue</button>
       <button id="deletePresetButton" class="button danger-quiet" type="button" disabled>Delete preset</button>
+    </section>
+
+    <section class="shared-workspace" aria-label="Shared curator workspace">
+      <div class="shared-heading">
+        <div>
+          <strong>Shared workspace</strong>
+          <p>Optional multi-curator sync. Local-only curation still works exactly as before.</p>
+        </div>
+        <span id="sharedStatus" class="shared-status">Local only</span>
+      </div>
+
+      <div class="shared-fields">
+        <label>
+          <span>Operator</span>
+          <input id="sharedActorInput" type="text" maxlength="80" placeholder="Alice">
+        </label>
+        <label>
+          <span>Workspace API</span>
+          <input id="sharedApiInput" type="text" value="/api/workspaces" placeholder="/api/workspaces">
+        </label>
+        <label>
+          <span>Bearer token (optional)</span>
+          <input id="sharedTokenInput" type="password" autocomplete="off" placeholder="session only">
+        </label>
+        <label class="shared-auto">
+          <input id="sharedAutoSync" type="checkbox" checked>
+          <span>Auto sync</span>
+        </label>
+      </div>
+
+      <div class="shared-actions">
+        <button id="sharedConnectButton" class="button secondary" type="button">Connect</button>
+        <button id="sharedSyncButton" class="button secondary" type="button" disabled>Sync now</button>
+        <button id="sharedDisconnectButton" class="button danger-quiet" type="button" disabled>Disconnect</button>
+      </div>
+
+      <p id="sharedMessage" class="shared-message" aria-live="polite"></p>
+      <p id="sharedActivity" class="shared-activity"></p>
+
+      <div id="sharedConflictBox" class="shared-conflict" hidden>
+        <p><strong><span id="sharedConflictCount">0</span> overlapping edits</strong> changed the same decision, note/tag record, or saved queue on both sides.</p>
+        <div class="shared-conflict-actions">
+          <button id="sharedPreferMineButton" class="button danger" type="button">Keep my conflicting edits</button>
+          <button id="sharedPreferSharedButton" class="button secondary" type="button">Use shared conflicting edits</button>
+        </div>
+      </div>
     </section>
 
     <section class="bulk-toolbar" aria-label="Bulk curation actions">
@@ -199,6 +246,8 @@
   <script src="dataset-loader.js"></script>
   <script src="curate-screening.js"></script>
   <script src="curate-actions.js"></script>
+  <script src="workspace-sync.js"></script>
   <script src="curate.js" defer></script>
+  <script src="curate-shared.js" defer></script>
 </body>
 </html>
