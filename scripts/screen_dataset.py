@@ -3,7 +3,9 @@
 
 This is a curation aid, not a content-safety oracle. The standard-library text
 checks target high-confidence contact/identity leakage. Optional local-image
-checks use Pillow for EXIF metadata and OpenCV for face / QR detection.
+checks use Pillow for EXIF metadata and OpenCV for face / QR detection. An
+optional local Hugging Face image classifier can add stronger model-based
+safety signals while still routing ambiguous cases to human review.
 
 By default the script annotates rounds without removing them. --exclude-high
 removes only rounds carrying at least one high-severity flag.
@@ -20,6 +22,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from image_safety import (
+    DEFAULT_HIGH_THRESHOLD,
+    DEFAULT_MODEL_ID,
+    DEFAULT_POSITIVE_LABELS,
+    DEFAULT_REVIEW_THRESHOLD,
+    TransformerImageSafetyClassifier,
+)
 
 EMAIL_RE = re.compile(r"(?<![\w.+-])[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}(?![\w-])", re.I)
 PHONE_RE = re.compile(
@@ -153,9 +163,13 @@ def analyze_round(
     inspect_images: bool = False,
     detect_faces: bool = False,
     detect_qr: bool = False,
+    safety_classifier: Any | None = None,
 ) -> dict[str, Any]:
     flags = text_flags(round_data)
     image_details: dict[str, Any] = {}
+
+    if safety_classifier is not None and not inspect_images:
+        raise ValueError("safety model screening requires inspect_images=True")
 
     if inspect_images:
         image_value = round_data.get("review_image")
@@ -176,6 +190,10 @@ def analyze_round(
                 )
                 flags.extend(cv_flags)
                 image_details.update(cv_details)
+                if safety_classifier is not None:
+                    model_flags, model_details = safety_classifier.classify(local_path)
+                    flags.extend(model_flags)
+                    image_details["safety_model"] = model_details
 
     # Deduplicate by stable flag identity while preserving first occurrence.
     unique: list[dict[str, str]] = []
@@ -206,11 +224,14 @@ def screen_dataset(
     inspect_images: bool = False,
     detect_faces: bool = False,
     detect_qr: bool = False,
+    safety_classifier: Any | None = None,
     exclude_high: bool = False,
 ) -> dict[str, Any]:
     rounds = payload.get("rounds")
     if not isinstance(rounds, list):
         raise ValueError("dataset must contain a rounds array")
+    if safety_classifier is not None and not inspect_images:
+        raise ValueError("safety model screening requires inspect_images=True")
 
     output_rounds: list[dict[str, Any]] = []
     flag_counts: Counter[str] = Counter()
@@ -228,6 +249,7 @@ def screen_dataset(
             inspect_images=inspect_images,
             detect_faces=detect_faces,
             detect_qr=detect_qr,
+            safety_classifier=safety_classifier,
         )
         if screening["needs_review"]:
             needs_review += 1
@@ -257,6 +279,7 @@ def screen_dataset(
         "inspect_images": inspect_images,
         "detect_faces": detect_faces,
         "detect_qr": detect_qr,
+        "safety_model": safety_classifier.describe() if safety_classifier is not None else None,
     }
     output["screening_summary"] = summary
     stats = output.get("stats")
@@ -278,6 +301,38 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--detect-faces", action="store_true", help="Flag likely faces with OpenCV Haar detection")
     parser.add_argument("--detect-qr", action="store_true", help="Flag QR codes with OpenCV")
     parser.add_argument(
+        "--safety-model",
+        nargs="?",
+        const=DEFAULT_MODEL_ID,
+        help=(
+            "Enable a local Hugging Face image-classification safety model. "
+            f"Passing the flag without a value uses {DEFAULT_MODEL_ID}."
+        ),
+    )
+    parser.add_argument("--safety-model-revision", help="Optional Hugging Face model revision/commit")
+    parser.add_argument(
+        "--safety-positive-label",
+        action="append",
+        dest="safety_positive_labels",
+        help="Classifier label treated as unsafe/review-worthy; repeat for multiple labels",
+    )
+    parser.add_argument(
+        "--safety-review-threshold",
+        type=float,
+        default=DEFAULT_REVIEW_THRESHOLD,
+        help="Positive score that produces a medium review flag",
+    )
+    parser.add_argument(
+        "--safety-high-threshold",
+        type=float,
+        default=DEFAULT_HIGH_THRESHOLD,
+        help="Positive score that produces a high-severity flag",
+    )
+    parser.add_argument(
+        "--safety-device",
+        help="Transformers pipeline device: auto (default), cpu, integer GPU index, or backend device string",
+    )
+    parser.add_argument(
         "--exclude-high",
         action="store_true",
         help="Remove only rounds carrying a high-severity screening flag",
@@ -287,11 +342,27 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    if (args.detect_faces or args.detect_qr) and not args.inspect_images:
-        raise SystemExit("--detect-faces/--detect-qr require --inspect-images")
+    if (args.detect_faces or args.detect_qr or args.safety_model) and not args.inspect_images:
+        raise SystemExit("--detect-faces/--detect-qr/--safety-model require --inspect-images")
     payload = json.loads(args.dataset.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise SystemExit("dataset root must be a JSON object")
+
+    safety_classifier = None
+    if args.safety_model:
+        positive_labels = args.safety_positive_labels or list(DEFAULT_POSITIVE_LABELS)
+        try:
+            safety_classifier = TransformerImageSafetyClassifier(
+                model_id=args.safety_model,
+                revision=args.safety_model_revision,
+                positive_labels=positive_labels,
+                review_threshold=args.safety_review_threshold,
+                high_threshold=args.safety_high_threshold,
+                device=args.safety_device,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
+
     try:
         result = screen_dataset(
             payload,
@@ -299,6 +370,7 @@ def main() -> None:
             inspect_images=args.inspect_images,
             detect_faces=args.detect_faces,
             detect_qr=args.detect_qr,
+            safety_classifier=safety_classifier,
             exclude_high=args.exclude_high,
         )
     except (ValueError, RuntimeError) as exc:
@@ -316,6 +388,8 @@ def main() -> None:
         f"{summary['high_risk_rounds']:,} high-risk, "
         f"{summary['excluded_high_risk_rounds']:,} excluded"
     )
+    if summary["safety_model"]:
+        print(f"Safety model: {summary['safety_model']['model']}")
     if summary["flag_counts"]:
         print(json.dumps(summary["flag_counts"], indent=2))
 
