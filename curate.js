@@ -9,11 +9,14 @@ const state = {
   originalOrder: new Map(),
   datasetSignature: "",
   decisions: {},
+  annotations: {},
+  presets: [],
   bulkUndo: null,
   category: "all",
   status: "undecided",
   screening: "all",
   signal: "all",
+  tag: "all",
   sort: "priority",
   filtered: [],
   index: 0,
@@ -51,7 +54,12 @@ const els = {
   statusSelect: document.querySelector("#statusSelect"),
   screeningSelect: document.querySelector("#screeningSelect"),
   signalSelect: document.querySelector("#signalSelect"),
+  tagSelect: document.querySelector("#tagSelect"),
   sortSelect: document.querySelector("#sortSelect"),
+  presetSelect: document.querySelector("#presetSelect"),
+  applyPresetButton: document.querySelector("#applyPresetButton"),
+  savePresetButton: document.querySelector("#savePresetButton"),
+  deletePresetButton: document.querySelector("#deletePresetButton"),
   reviewedStat: document.querySelector("#reviewedStat"),
   keptStat: document.querySelector("#keptStat"),
   rejectedStat: document.querySelector("#rejectedStat"),
@@ -69,6 +77,8 @@ const els = {
   rejectHighCount: document.querySelector("#rejectHighCount"),
   undoBulkButton: document.querySelector("#undoBulkButton"),
   bulkStatus: document.querySelector("#bulkStatus"),
+  tagsInput: document.querySelector("#tagsInput"),
+  noteInput: document.querySelector("#noteInput"),
   datasetNote: document.querySelector("#datasetNote"),
 };
 
@@ -101,25 +111,34 @@ function storageKey() {
   return `mystery-cart-curation:${state.datasetSignature}`;
 }
 
-function loadStoredDecisions() {
+function loadStoredWorkspace() {
   try {
     const raw = localStorage.getItem(storageKey());
-    if (!raw) return {};
+    if (!raw) return { decisions: {}, annotations: {}, presets: [] };
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" && parsed.decisions && typeof parsed.decisions === "object"
-      ? parsed.decisions
-      : {};
+    if (!parsed || typeof parsed !== "object") return { decisions: {}, annotations: {}, presets: [] };
+    return {
+      decisions: parsed.decisions && typeof parsed.decisions === "object" ? parsed.decisions : {},
+      annotations: parsed.annotations && typeof parsed.annotations === "object" ? parsed.annotations : {},
+      presets: Array.isArray(parsed.presets) ? parsed.presets : [],
+    };
   } catch {
-    return {};
+    return { decisions: {}, annotations: {}, presets: [] };
   }
 }
 
-function saveDecisions() {
+function saveWorkspace() {
   localStorage.setItem(storageKey(), JSON.stringify({
     dataset_signature: state.datasetSignature,
     decisions: state.decisions,
+    annotations: state.annotations,
+    presets: state.presets,
     updated_at: new Date().toISOString(),
   }));
+}
+
+function saveDecisions() {
+  saveWorkspace();
 }
 
 function clearBulkUndo() {
@@ -141,6 +160,30 @@ function populateSignals() {
     options.push(new Option(humanizeFlag(signal), signal));
   });
   els.signalSelect.replaceChildren(...options);
+}
+
+function populateTags() {
+  const previous = state.tag;
+  const options = [new Option("All tags", "all")];
+  CuratorState.allTags(state.annotations).forEach(({ key, label }) => {
+    options.push(new Option(label, key));
+  });
+  els.tagSelect.replaceChildren(...options);
+  state.tag = [...els.tagSelect.options].some((option) => option.value === previous) ? previous : "all";
+  els.tagSelect.value = state.tag;
+}
+
+function populatePresets(selectedName = "") {
+  const options = [new Option("Choose a saved queue", "")];
+  state.presets.forEach((preset) => options.push(new Option(preset.name, CuratorState.presetKey(preset.name))));
+  els.presetSelect.replaceChildren(...options);
+  const selectedKey = CuratorState.presetKey(selectedName);
+  if (selectedKey && [...els.presetSelect.options].some((option) => option.value === selectedKey)) {
+    els.presetSelect.value = selectedKey;
+  }
+  const hasSelection = Boolean(els.presetSelect.value);
+  els.applyPresetButton.disabled = !hasSelection;
+  els.deletePresetButton.disabled = !hasSelection;
 }
 
 function matchesStatus(round) {
@@ -181,7 +224,8 @@ function rebuildFilter({ preserveRoundId = null } = {}) {
     const categoryMatch = state.category === "all" || categoryKey(round) === state.category;
     const screeningMatch = CuratorScreening.matches(round, state.screening);
     const signalMatch = CuratorActions.matchesSignal(round, state.signal);
-    return categoryMatch && matchesStatus(round) && screeningMatch && signalMatch;
+    const tagMatch = CuratorState.hasTag(state.annotations[round.id], state.tag);
+    return categoryMatch && matchesStatus(round) && screeningMatch && signalMatch && tagMatch;
   });
   state.filtered.sort(compareRounds);
 
@@ -196,6 +240,82 @@ function rebuildFilter({ preserveRoundId = null } = {}) {
 
 function currentRound() {
   return state.filtered[state.index];
+}
+
+function renderAnnotation(roundId) {
+  const annotation = CuratorState.normalizeAnnotation(state.annotations[roundId]);
+  els.tagsInput.value = annotation.tags.join(", ");
+  els.noteInput.value = annotation.note;
+}
+
+function saveCurrentAnnotation() {
+  const entry = currentRound();
+  if (!entry) return;
+  const annotation = CuratorState.normalizeAnnotation({
+    note: els.noteInput.value,
+    tags: els.tagsInput.value,
+  });
+  if (annotation.note || annotation.tags.length) state.annotations[entry.id] = annotation;
+  else delete state.annotations[entry.id];
+  saveWorkspace();
+  populateTags();
+  if (state.tag !== "all" && !CuratorState.hasTag(annotation, state.tag)) rebuildFilter();
+}
+
+function currentPresetSnapshot(name) {
+  return {
+    name,
+    category: state.category,
+    status: state.status,
+    screening: state.screening,
+    signal: state.signal,
+    tag: state.tag,
+    sort: state.sort,
+    maxPriority: bulkPriorityValue(),
+  };
+}
+
+function selectedPreset() {
+  const key = els.presetSelect.value;
+  return state.presets.find((preset) => CuratorState.presetKey(preset.name) === key) || null;
+}
+
+function setSelectValue(element, value, fallback = "all") {
+  const available = [...element.options].some((option) => option.value === value);
+  element.value = available ? value : fallback;
+  return element.value;
+}
+
+function applySelectedPreset() {
+  const preset = selectedPreset();
+  if (!preset) return;
+  state.category = setSelectValue(els.categorySelect, preset.category);
+  state.status = setSelectValue(els.statusSelect, preset.status, "undecided");
+  state.screening = setSelectValue(els.screeningSelect, preset.screening);
+  state.signal = setSelectValue(els.signalSelect, preset.signal);
+  state.tag = setSelectValue(els.tagSelect, preset.tag);
+  state.sort = setSelectValue(els.sortSelect, preset.sort, "priority");
+  els.bulkPriorityInput.value = String(preset.maxPriority);
+  state.index = 0;
+  rebuildFilter();
+}
+
+function saveCurrentPreset() {
+  const proposed = window.prompt("Name this curator queue preset:");
+  if (!proposed || !proposed.trim()) return;
+  const preset = currentPresetSnapshot(proposed);
+  state.presets = CuratorState.upsertPreset(state.presets, preset);
+  saveWorkspace();
+  populatePresets(preset.name);
+}
+
+function deleteSelectedPreset() {
+  const preset = selectedPreset();
+  if (!preset) return;
+  if (!window.confirm(`Delete queue preset “${preset.name}”?`)) return;
+  state.presets = CuratorState.deletePreset(state.presets, preset.name);
+  saveWorkspace();
+  populatePresets();
 }
 
 function formatMeta(product) {
@@ -359,6 +479,7 @@ async function render() {
     renderDecision(round);
     renderScreening(round);
     renderAnalysis(round);
+    renderAnnotation(round.id);
 
     els.imageFallback.hidden = true;
     els.reviewImage.hidden = false;
@@ -434,7 +555,7 @@ function undoBulk() {
   rebuildFilter({ preserveRoundId: currentRound()?.id || null });
 }
 
-function decisionExportPayload() {
+function actionsDecisionPayload() {
   const kept = [];
   const rejected = [];
   Object.entries(state.decisions).forEach(([id, decision]) => {
@@ -446,11 +567,23 @@ function decisionExportPayload() {
   return {
     version: 1,
     dataset_signature: state.datasetSignature,
-    dataset_name: state.dataset?.name || null,
-    exported_at: new Date().toISOString(),
-    reviewed_count: kept.length + rejected.length,
     kept_ids: kept,
     rejected_ids: rejected,
+  };
+}
+
+function decisionExportPayload() {
+  const actions = actionsDecisionPayload();
+  return {
+    version: 2,
+    dataset_signature: actions.dataset_signature,
+    dataset_name: state.dataset?.name || null,
+    exported_at: new Date().toISOString(),
+    reviewed_count: actions.kept_ids.length + actions.rejected_ids.length,
+    kept_ids: actions.kept_ids,
+    rejected_ids: actions.rejected_ids,
+    annotations: state.annotations,
+    queue_presets: state.presets,
   };
 }
 
@@ -460,7 +593,7 @@ function exportDecisions() {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
-  anchor.download = `curation-${state.datasetSignature}.json`;
+    anchor.download = `curation-workspace-${state.datasetSignature}.json`;
   document.body.append(anchor);
   anchor.click();
   anchor.remove();
@@ -483,7 +616,16 @@ async function importDecisions(file) {
   const validIds = new Set(state.rounds.map((round) => round.id));
   payload.kept_ids.forEach((id) => { if (validIds.has(id)) state.decisions[id] = "keep"; });
   payload.rejected_ids.forEach((id) => { if (validIds.has(id)) state.decisions[id] = "reject"; });
-  saveDecisions();
+  const importedAnnotations = CuratorState.normalizeAnnotations(payload.annotations, validIds);
+  state.annotations = { ...state.annotations, ...importedAnnotations };
+  if (Array.isArray(payload.queue_presets)) {
+    payload.queue_presets.forEach((preset) => {
+      state.presets = CuratorState.upsertPreset(state.presets, preset);
+    });
+  }
+  saveWorkspace();
+  populateTags();
+  populatePresets();
   rebuildFilter();
 }
 
@@ -535,6 +677,21 @@ function bindEvents() {
     state.index = 0;
     rebuildFilter();
   });
+  els.tagSelect.addEventListener("change", () => {
+  state.tag = els.tagSelect.value;
+  state.index = 0;
+  rebuildFilter();
+});
+els.presetSelect.addEventListener("change", () => {
+  const hasSelection = Boolean(els.presetSelect.value);
+  els.applyPresetButton.disabled = !hasSelection;
+  els.deletePresetButton.disabled = !hasSelection;
+});
+els.applyPresetButton.addEventListener("click", applySelectedPreset);
+els.savePresetButton.addEventListener("click", saveCurrentPreset);
+els.deletePresetButton.addEventListener("click", deleteSelectedPreset);
+els.tagsInput.addEventListener("change", saveCurrentAnnotation);
+els.noteInput.addEventListener("change", saveCurrentAnnotation);
   els.sortSelect.addEventListener("change", () => {
     const currentId = currentRound()?.id || null;
     state.sort = els.sortSelect.value;
@@ -574,9 +731,15 @@ async function init() {
     state.rounds = loader.index;
     state.rounds.forEach((round, index) => state.originalOrder.set(round.id, index));
     state.datasetSignature = loader.signature || datasetSignature(state.rounds);
-    state.decisions = loadStoredDecisions();
+    const stored = loadStoredWorkspace();
+    const validIds = new Set(state.rounds.map((round) => round.id));
+    state.decisions = stored.decisions;
+    state.annotations = CuratorState.normalizeAnnotations(stored.annotations, validIds);
+    state.presets = CuratorState.normalizePresets(stored.presets);
     populateCategories();
     populateSignals();
+    populateTags();
+    populatePresets();
     const scored = state.rounds.filter((round) => round.analysis && typeof round.analysis === "object").length;
     const screened = state.rounds.filter((round) => CuratorScreening.screening(round)).length;
     const flagged = state.rounds.filter((round) => CuratorScreening.needsReview(round)).length;

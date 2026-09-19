@@ -19,6 +19,7 @@ on:
       - "scripts/shard_dataset.py"
       - "scripts/validate_shards.py"
       - "tests/e2e_game.js"
+      - "tests/e2e_curator_productivity.js"
       - "tests/build_e2e_pack.py"
       - ".github/workflows/browser-e2e.yml"
   push:
@@ -39,6 +40,7 @@ on:
       - "scripts/shard_dataset.py"
       - "scripts/validate_shards.py"
       - "tests/e2e_game.js"
+      - "tests/e2e_curator_productivity.js"
       - "tests/build_e2e_pack.py"
       - ".github/workflows/browser-e2e.yml"
 
@@ -82,7 +84,9 @@ jobs:
       - name: Run browser e2e
         env:
           E2E_BASE_URL: http://127.0.0.1:8000
-        run: node tests/e2e_game.js
+        run: |
+          node tests/e2e_game.js
+          node tests/e2e_curator_productivity.js
 
       - name: Show server log on failure
         if: failure()
