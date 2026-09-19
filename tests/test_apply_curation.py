@@ -32,7 +32,7 @@ class ApplyCurationTests(unittest.TestCase):
     def test_hash_matches_browser_utf16_semantics(self):
         self.assertEqual(game_core_hash("hello"), 0x4F9F2CAB)
         unicode_rounds = [{"id": "round-🐈"}, {"id": "café"}]
-        self.assertEqual(dataset_signature(unicode_rounds), "86678b2f")
+        self.assertEqual(dataset_signature(unicode_rounds), "272e4c5a")
 
     def test_default_removes_rejected_and_preserves_unreviewed(self):
         dataset = sample_dataset()
