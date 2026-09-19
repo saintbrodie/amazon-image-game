@@ -41,6 +41,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/build-deployment.yml"
+      - "requirements-screening.txt"
       - "scripts/cache_images.py"
       - "scripts/screen_dataset.py"
       - "scripts/shard_dataset.py"
