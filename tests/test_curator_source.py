@@ -8,20 +8,37 @@ class CuratorSourceTests(unittest.TestCase):
     def test_screening_controls_and_loader_scripts_are_present(self):
         html = (ROOT / "curate.html").read_text(encoding="utf-8")
         self.assertIn('id="screeningSelect"', html)
+        self.assertIn('id="signalSelect"', html)
         self.assertIn('id="screeningRisk"', html)
         self.assertIn('id="screeningStatus"', html)
         self.assertIn('id="screeningFlags"', html)
+        self.assertIn('id="keepClearButton"', html)
+        self.assertIn('id="rejectHighButton"', html)
+        self.assertIn('id="undoBulkButton"', html)
         self.assertIn('src="dataset-loader.js"', html)
         self.assertIn('src="curate-screening.js"', html)
+        self.assertIn('src="curate-actions.js"', html)
 
     def test_curator_filters_sorts_and_renders_screening(self):
         source = (ROOT / "curate.js").read_text(encoding="utf-8")
         self.assertIn('screening: "all"', source)
+        self.assertIn('signal: "all"', source)
         self.assertIn("CuratorScreening.matches(round, state.screening)", source)
+        self.assertIn("CuratorActions.matchesSignal(round, state.signal)", source)
         self.assertIn('state.sort === "screening"', source)
         self.assertIn("CuratorScreening.riskScore", source)
         self.assertIn("renderScreening(round);", source)
         self.assertIn("CuratorScreening.needsReview", source)
+
+    def test_curator_has_reversible_conservative_bulk_actions(self):
+        source = (ROOT / "curate.js").read_text(encoding="utf-8")
+        self.assertIn('runBulk("keep-clear", "keep")', source)
+        self.assertIn('runBulk("reject-high", "reject")', source)
+        self.assertIn("CuratorActions.bulkCandidates", source)
+        self.assertIn("CuratorActions.applyBulk", source)
+        self.assertIn("CuratorActions.restoreBulk", source)
+        self.assertIn("Existing manual decisions will not be changed", source)
+        self.assertIn("window.confirm", source)
 
     def test_curator_selects_from_catalog_then_lazy_loads_current_round(self):
         source = (ROOT / "curate.js").read_text(encoding="utf-8")
