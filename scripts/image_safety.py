@@ -18,8 +18,8 @@ from typing import Any, Callable, Iterable
 
 DEFAULT_MODEL_ID = "Falconsai/nsfw_image_detection"
 DEFAULT_POSITIVE_LABELS = ("nsfw",)
-DEFAULT_REVIEW_THRESHOLD = 0.55
-DEFAULT_HIGH_THRESHOLD = 0.85
+DEFAULT_REVIEW_THRESHOLD = 0.60
+DEFAULT_HIGH_THRESHOLD = 0.95
 
 
 def normalize_label(value: Any) -> str:
