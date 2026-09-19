@@ -71,7 +71,7 @@ python scripts/screen_dataset.py data/rounds.cached.json \
   --exclude-high
 ```
 
-Medium-severity signals such as a detected face, QR code, external URL, social handle, or identifying EXIF field remain in the pack for human curation.
+Medium-severity signals such as a detected face, QR code, external URL, social handle, or identifying EXIF field remain in the pack for human curation. A medium flag means "look at this round," not "this round is unsafe."
 
 ## Important limitation
 
