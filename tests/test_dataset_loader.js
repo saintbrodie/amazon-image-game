@@ -45,6 +45,47 @@ function round(id, category = "Beauty") {
   }
 
   {
+    const delivery = DatasetLoader.normalizeReviewImageDelivery({
+      path_prefix: "assets/review-cache/",
+      base_url: "https://cdn.example.test/game-images/",
+    });
+    assert.deepStrictEqual(delivery, {
+      path_prefix: "assets/review-cache/",
+      base_url: "https://cdn.example.test/game-images/",
+    });
+    assert.strictEqual(
+      DatasetLoader.resolveReviewImage("assets/review-cache/abc.jpg", delivery),
+      "https://cdn.example.test/game-images/abc.jpg",
+    );
+    assert.strictEqual(
+      DatasetLoader.resolveReviewImage("https://images.example.test/original.jpg", delivery),
+      "https://images.example.test/original.jpg",
+    );
+    assert.strictEqual(
+      DatasetLoader.resolveReviewImage("assets/demo/local.svg", delivery),
+      "assets/demo/local.svg",
+    );
+    assert.strictEqual(
+      DatasetLoader.resolveReviewImage("assets/review-cache/../escape.jpg", delivery),
+      "assets/review-cache/../escape.jpg",
+    );
+    assert.strictEqual(
+      DatasetLoader.normalizeReviewImageDelivery({
+        path_prefix: "../review-cache/",
+        base_url: "https://cdn.example.test/",
+      }),
+      null,
+    );
+    assert.strictEqual(
+      DatasetLoader.normalizeReviewImageDelivery({
+        path_prefix: "assets/review-cache/",
+        base_url: "javascript:alert(1)",
+      }),
+      null,
+    );
+  }
+
+  {
     const calls = [];
     const manifest = {
       version: 1,
@@ -52,6 +93,12 @@ function round(id, category = "Beauty") {
       dataset_signature: "sig123",
       round_count: 3,
       categories: { Automotive: 1, Beauty: 2 },
+      asset_delivery: {
+        review_images: {
+          path_prefix: "assets/review-cache/",
+          base_url: "https://cdn.example.test/reviews/",
+        },
+      },
       shards: [
         { id: "0001", path: "shards/rounds-0001.json" },
         { id: "0002", path: "shards/rounds-0002.json" },
@@ -80,6 +127,8 @@ function round(id, category = "Beauty") {
         { id: "r3", category: "Beauty", shard: "0001" },
       ],
     };
+    const r1 = round("r1");
+    r1.review_image = "assets/review-cache/r1.jpg";
     const routes = {
       "data/rounds.manifest.json": { payload: manifest },
       "data/shards/rounds-0001.json": {
@@ -87,7 +136,7 @@ function round(id, category = "Beauty") {
           format: "amazon-image-game-shard",
           dataset_signature: "sig123",
           shard: { id: "0001" },
-          rounds: [round("r1"), round("r3")],
+          rounds: [r1, round("r3")],
         },
       },
       "data/shards/rounds-0002.json": {
@@ -124,6 +173,8 @@ function round(id, category = "Beauty") {
     const selected = [loader.index[2], loader.index[0], loader.index[1]];
     const loaded = await loader.loadEntries(selected);
     assert.deepStrictEqual(loaded.map((item) => item.id), ["r3", "r1", "r2"]);
+    assert.strictEqual(loaded[1].review_image, "https://cdn.example.test/reviews/r1.jpg");
+    assert.strictEqual(loaded[0].review_image, "https://example.test/r3.jpg");
     assert.strictEqual(calls.filter((value) => value === "data/shards/rounds-0001.json").length, 1);
     assert.strictEqual(calls.filter((value) => value === "data/shards/rounds-0002.json").length, 1);
 
@@ -134,6 +185,7 @@ function round(id, category = "Beauty") {
   {
     const calls = [];
     const inlineRound = round("demo-1");
+    inlineRound.review_image = "assets/review-cache/demo-1.webp";
     inlineRound.analysis = { curation_priority: 7, difficulty_score: 12, flags: ["ignored"] };
     inlineRound.screening = {
       risk_score: 50,
@@ -145,7 +197,17 @@ function round(id, category = "Beauty") {
         { name: "contact_email", severity: "high" },
       ],
     };
-    const demo = { version: 1, name: "Demo", rounds: [inlineRound] };
+    const demo = {
+      version: 1,
+      name: "Demo",
+      asset_delivery: {
+        review_images: {
+          path_prefix: "assets/review-cache/",
+          base_url: "https://cdn.example.test/inline/",
+        },
+      },
+      rounds: [inlineRound],
+    };
     const routes = {
       "data/rounds.manifest.json": { payload: null, status: 404 },
       "data/rounds.json": { payload: null, status: 404 },
@@ -162,7 +224,9 @@ function round(id, category = "Beauty") {
       severity_counts: { high: 1 },
       flags: [{ name: "contact_email", severity: "high" }],
     });
-    assert.deepStrictEqual((await loader.loadEntries(loader.index)).map((item) => item.id), ["demo-1"]);
+    const loaded = await loader.loadEntries(loader.index);
+    assert.deepStrictEqual(loaded.map((item) => item.id), ["demo-1"]);
+    assert.strictEqual(loaded[0].review_image, "https://cdn.example.test/inline/demo-1.webp");
   }
 
   {
