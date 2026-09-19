@@ -1,0 +1,75 @@
+name: Browser E2E
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "app.js"
+      - "dataset-loader.js"
+      - "game-core.js"
+      - "index.html"
+      - "data/demo.json"
+      - "scripts/shard_dataset.py"
+      - "scripts/validate_shards.py"
+      - "tests/e2e_game.js"
+      - "tests/build_e2e_pack.py"
+      - ".github/workflows/browser-e2e.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app.js"
+      - "dataset-loader.js"
+      - "game-core.js"
+      - "index.html"
+      - "data/demo.json"
+      - "scripts/shard_dataset.py"
+      - "scripts/validate_shards.py"
+      - "tests/e2e_game.js"
+      - "tests/build_e2e_pack.py"
+      - ".github/workflows/browser-e2e.yml"
+
+concurrency:
+  group: browser-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build sharded browser fixture
+        run: |
+          python tests/build_e2e_pack.py
+          python scripts/shard_dataset.py data/e2e-pack.json \
+            --manifest data/rounds.manifest.json \
+            --shard-size 5
+          python scripts/validate_shards.py data/rounds.manifest.json
+
+      - name: Install Playwright Chromium
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: Start static server
+        run: |
+          python -m http.server 8000 --bind 127.0.0.1 > /tmp/amazon-image-game-http.log 2>&1 &
+          echo $! > /tmp/amazon-image-game-http.pid
+          for attempt in {1..30}; do
+            if curl -fsS http://127.0.0.1:8000/ >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/amazon-image-game-http.log
+          exit 1
+
+      - name: Run browser e2e
+        env:
+          E2E_BASE_URL: http://127.0.0.1:8000
+        run: node tests/e2e_game.js
+
+      - name: Show server log on failure
+        if: failure()
+        run: cat /tmp/amazon-image-game-http.log || true
